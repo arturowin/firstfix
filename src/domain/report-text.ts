@@ -136,6 +136,9 @@ export function describeAction(a: Action, hints: RemediationHints): ActionText {
     if (v.candidate) {
       const candidate = v.candidate;
       steps.push(`${at}: ${candidateText(v.installedVersion, candidate, v.advisories.length)}.`);
+      if (candidate.stillAffected.length > 0) {
+        steps.push(`Still listed as affected at ${candidate.version}: ${list(candidate.stillAffected)}. A rescan after the change confirms what remains.`);
+      }
       steps.push(...routes(a.package, { ...v, candidate }, hints));
       if (v.candidate.majorJump) {
         steps.push(
@@ -144,6 +147,10 @@ export function describeAction(a: Action, hints: RemediationHints): ActionText {
             : `${v.candidate.version} is a major-version jump from ${v.installedVersion}: check the changelog for breaking changes.`,
         );
       }
+    } else if (v.noUsefulCandidate) {
+      steps.push(
+        `${at}: no upgrade recommended. The advisories' candidate versions are each still listed as affected by another of these advisories; check the advisories for a release that leaves them all.`,
+      );
     } else if (v.unresolved.length > 0 || v.unplaced.length > 0) {
       steps.push(`${at}: no candidate version.`);
     }

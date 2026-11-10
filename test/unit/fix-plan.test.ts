@@ -126,9 +126,9 @@ describe('grouping into actions', () => {
       ],
       scheme,
     );
-    expect(a?.versions[0]?.candidate).toEqual({ version: '2.2.0', addresses: 2, majorJump: true });
+    expect(a?.versions[0]?.candidate).toEqual({ version: '2.2.0', addresses: 2, stillAffected: [], majorJump: true });
     // The compatible 1.x choice addresses only A.
-    expect(a?.versions[0]?.compatibleCandidate).toEqual({ version: '1.2.0', addresses: 1, majorJump: false });
+    expect(a?.versions[0]?.compatibleCandidate).toEqual({ version: '1.2.0', addresses: 1, stillAffected: ['B'], majorJump: false });
   });
 
   it('a later interval with no fix: the proposed version addresses only what it really leaves', () => {
@@ -139,7 +139,59 @@ describe('grouping into actions', () => {
       ],
       scheme,
     );
-    expect(a?.versions[0]?.candidate).toEqual({ version: '1.6.0', addresses: 1, majorJump: false });
+    expect(a?.versions[0]?.candidate).toEqual({ version: '1.6.0', addresses: 1, stillAffected: ['A'], majorJump: false });
+  });
+
+  const A_ID = 'GHSA-aaaa-aaaa-aaaa';
+  const B_ID = 'GHSA-bbbb-bbbb-bbbb';
+  const promptFor = (a: ReturnType<typeof buildFixPlan>[number] | undefined) =>
+    buildAgentPrompt({
+      repoUrl: 'https://github.com/o/r', commitSha: 'a'.repeat(40), lockfilePath: 'package-lock.json', advisorySource: 'OSV.dev',
+      scannedAt: '2026-11-11', actions: a ? [a] : [], hintsFor: () => npm.hints, schemeFor: () => npmVersionScheme,
+    }) ?? '';
+
+  it('never recommends an upgrade that addresses zero advisories: falls back to a verified partial fix (review finding)', () => {
+    // 1.0.1 fixes A, 1.0.2 fixes B, but combining them lands on 1.0.3, which both list as affected.
+    const A: AffectedRange[] = [range('0', '1.0.1'), range('1.0.2', '1.0.3'), { kind: 'versions', versions: ['1.0.3'] }];
+    const B: AffectedRange[] = [range('0', '1.0.2'), { kind: 'versions', versions: ['1.0.3'] }];
+    const [a] = buildFixPlan(
+      [
+        f({ package: 'lib', installedVersion: '1.0.0', advisoryId: A_ID, candidateVersion: '1.0.1', fixStatus: 'candidate', affectedRanges: A }),
+        f({ package: 'lib', installedVersion: '1.0.0', advisoryId: B_ID, candidateVersion: '1.0.2', fixStatus: 'candidate', affectedRanges: B }),
+      ],
+      scheme,
+    );
+    expect(a?.kind).toBe('upgrade');
+    expect(a?.versions[0]?.candidate).toEqual({ version: '1.0.1', addresses: 1, stillAffected: [B_ID], majorJump: false });
+    const steps = describeAction(a ?? expect.fail(), npm.hints).steps;
+    expect(steps).toContain(`Still listed as affected at 1.0.1: ${B_ID}. A rescan after the change confirms what remains.`);
+    expect(steps.join(' ')).not.toContain('1.0.3');
+    // The copied prompt says the same.
+    const text = promptFor(a);
+    expect(text).toContain('Candidate 1.0.1: addresses 1 of 2 advisories');
+    expect(text).toContain(`Still affected at 1.0.1: ${B_ID}.`);
+    expect(text).not.toContain('1.0.3');
+  });
+
+  it('when no candidate addresses anything, no upgrade is recommended (report and prompt agree)', () => {
+    // Candidates stored by an older version, before they were checked against explicit version lists: each is
+    // still listed as affected, and every combination too.
+    const A: AffectedRange[] = [range('0', '1.0.1'), { kind: 'versions', versions: ['1.0.1', '1.0.2'] }];
+    const B: AffectedRange[] = [range('0', '1.0.2'), { kind: 'versions', versions: ['1.0.2'] }];
+    const [a] = buildFixPlan(
+      [
+        f({ package: 'lib', installedVersion: '1.0.0', advisoryId: A_ID, candidateVersion: '1.0.1', fixStatus: 'candidate', affectedRanges: A }),
+        f({ package: 'lib', installedVersion: '1.0.0', advisoryId: B_ID, candidateVersion: '1.0.2', fixStatus: 'candidate', affectedRanges: B }),
+      ],
+      scheme,
+    );
+    expect(a).toMatchObject({ kind: 'review', versions: [{ candidate: null, noUsefulCandidate: true }] });
+    const steps = describeAction(a ?? expect.fail(), npm.hints).steps.join(' ');
+    expect(steps).toContain('no upgrade recommended');
+    expect(steps).not.toContain('npm install');
+    const text = promptFor(a);
+    expect(text).toContain('No upgrade recommended: no candidate version leaves any of these advisories.');
+    expect(text).not.toContain('Run: npm install');
   });
 
   it('without stored ranges nothing is claimed as addressed', () => {

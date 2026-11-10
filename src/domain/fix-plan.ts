@@ -46,6 +46,8 @@ export interface CandidateStep {
   version: string;
   /** Advisories on this installed version that this candidate addresses according to advisory data. */
   addresses: number;
+  /** Advisories with a candidate that still list this version as affected (shown, so a partial fix is clear). */
+  stillAffected: string[];
   majorJump: boolean;
 }
 
@@ -68,6 +70,11 @@ export interface ActionVersion {
   unresolved: string[];
   /** Advisories whose ranges don't place this version: see the advisory. */
   unplaced: string[];
+  /**
+   * Advisories have candidate versions, but no version from them leaves any advisory (each is still listed as
+   * affected by another): no upgrade is recommended for this version.
+   */
+  noUsefulCandidate: boolean;
 }
 
 export interface Action {
@@ -161,16 +168,37 @@ function planVersion(installed: string, findings: PlanFinding[], scheme: Version
   const step = (version: string): CandidateStep => ({
     version,
     addresses: withCandidate.filter((f) => !affects(f, version)).length,
+    // Only what the stored ranges show; rows without ranges can't be checked either way.
+    stillAffected: withCandidate.filter((f) => f.affectedRanges !== null && affects(f, version)).map((f) => f.advisoryId),
     majorJump: scheme ? scheme.isMajorJump(installed, version) : false,
   });
 
   let candidate: CandidateStep | null = null;
   let compatibleCandidate: CandidateStep | null = null;
+  let noUsefulCandidate = false;
   if (scheme && withCandidate.length > 0) {
     const versions = withCandidate.map((f) => f.candidateVersion);
     const highest = maxBy(versions, (a, b) => scheme.compare(a, b));
     if (highest !== undefined) {
       candidate = step(resolve(highest, true));
+      // The combined version can land where every advisory still lists it as affected. Never recommend an
+      // upgrade that addresses nothing: fall back to the option that addresses most (lowest version on a tie),
+      // or to no candidate at all.
+      // Only when the ranges show it: without stored ranges (older rows) "0" means "can't verify", not "none".
+      if (candidate.addresses === 0 && withCandidate.every((f) => f.affectedRanges !== null)) {
+        const options = [...new Set([...versions, ...versions.map((v) => resolve(v, true))])].map(step);
+        const best = options.reduce<CandidateStep | null>(
+          (b, o) =>
+            o.addresses > 0 && (b === null || o.addresses > b.addresses || (o.addresses === b.addresses && scheme.compare(o.version, b.version) < 0))
+              ? o
+              : b,
+          null,
+        );
+        candidate = best;
+        noUsefulCandidate = best === null;
+      }
+    }
+    if (candidate) {
       if (candidate.majorJump) {
         const compatible = maxBy(
           versions.filter((v) => !scheme.isMajorJump(installed, v)),
@@ -204,6 +232,7 @@ function planVersion(installed: string, findings: PlanFinding[], scheme: Version
     compatibleCandidate,
     unresolved: findings.filter((f) => f.fixStatus === 'no_fix').map((f) => f.advisoryId),
     unplaced: findings.filter((f) => f.fixStatus === 'unknown').map((f) => f.advisoryId),
+    noUsefulCandidate,
   };
 }
 
@@ -235,7 +264,7 @@ export function buildFixPlan(
       ? 'remove_malicious'
       : versions.some((v) => v.candidate)
         ? 'upgrade'
-        : versions.every((v) => v.unplaced.length === 0)
+        : versions.every((v) => v.unplaced.length === 0 && !v.noUsefulCandidate)
           ? 'no_fix'
           : 'review';
 

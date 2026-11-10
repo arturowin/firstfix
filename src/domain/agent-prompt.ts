@@ -96,6 +96,8 @@ function changeLines(a: Action, v: ActionVersion, hints: RemediationHints, check
   const c = v.candidate;
   if (c && check.version(c.version)) {
     out.push(`   - Candidate ${c.version}: addresses ${String(c.addresses)} of ${String(v.advisories.length)} advisories according to advisory data.`);
+    const remaining = c.stillAffected.filter((id) => ADVISORY_ID.test(id));
+    if (remaining.length > 0) out.push(`   - Still affected at ${c.version}: ${remaining.join(', ')}. Report these after the change.`);
     const direct = v.directAs.length > 0 ? v.directAs : v.isDirect ? [a.package] : [];
     for (const declared of direct) {
       const cmd = check.name(declared) ? hints.upgradeCommand(a.package, c.version, declared) : null;
@@ -113,6 +115,8 @@ function changeLines(a: Action, v: ActionVersion, hints: RemediationHints, check
           : '   - Major-version jump: stop and report before making this change.',
       );
     }
+  } else if (v.noUsefulCandidate) {
+    out.push('   - No upgrade recommended: no candidate version leaves any of these advisories. Do not change it; report it.');
   } else if (v.unresolved.length > 0) {
     out.push('   - No fixed version published: do not change it; report it as unresolved.');
   } else {
