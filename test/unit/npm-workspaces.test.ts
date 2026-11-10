@@ -68,6 +68,46 @@ describe('workspace globs: bounded work on untrusted patterns (review finding)',
   });
 });
 
+describe('workspace globs: memory bounded before allocation (review finding)', () => {
+  // ~1 KB pattern (~512 segments) against ~200 KB paths (~100,000 segments): the full table was ~51 MB per
+  // uncached path, allocated even after the budget was spent.
+  const pattern = 'a/'.repeat(512).slice(0, 1023);
+  const bigPath = (c: string) => `${c}/`.repeat(100_000).slice(0, 199_999);
+
+  it('a huge pattern x path is refused before allocating; later uncached paths allocate nothing either', () => {
+    const matcher = workspaceMatcher({ workspaces: [pattern] });
+    const before = process.memoryUsage().arrayBuffers;
+    expect(matcher(bigPath('x'))).toBe(false);
+    expect(matcher(bigPath('y'))).toBe(false);
+    expect(process.memoryUsage().arrayBuffers - before).toBeLessThan(4 * 1024 * 1024);
+  });
+
+  it('normal wildcard matching is unchanged by the rolling rows', () => {
+    const m = workspaceMatcher({ workspaces: ['apps/**/web', 'packages/ui-*', 'libs/*/src'] });
+    expect([m('apps/web'), m('apps/a/b/web'), m('packages/ui-kit'), m('libs/x/src'), m('libs/x/y/src'), m('apps/web/x')]).toEqual([
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+    ]);
+  });
+
+  it('when matching can’t finish within the budget, the link stays visible as unchecked', () => {
+    const target = bigPath('w');
+    const r = parsePackageLock({
+      lockfileVersion: 3,
+      packages: {
+        '': { workspaces: [pattern, '**'] },
+        [target]: { name: 'huge-ws', version: '1.0.0' },
+        'node_modules/huge-ws': { resolved: target, link: true },
+      },
+    });
+    expect(r.kind === 'ok' && r.uncheckable).toEqual([{ name: 'huge-ws', version: '1.0.0', reason: 'unsupported_source' }]);
+  });
+});
+
 describe('workspace links vs local file: dependencies', () => {
   const lockWith = (workspaces: unknown) =>
     parsePackageLock({

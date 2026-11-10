@@ -83,33 +83,35 @@ function matchSegment(pattern: string, text: string, budget: Budget): boolean | 
 
 /**
  * Pattern segments against path segments, where a `**` segment matches zero or more path segments.
- * Dynamic programming over (pattern index, path index): at most pattern segments × path segments cells,
- * each cell doing at most one segment match. Returns null when the budget runs out.
+ * Dynamic programming over (pattern index, path index), (P + 1) x (S + 1) cells. The whole table's cost is
+ * charged to the budget before anything is allocated, and only two rows of S + 1 cells are kept, so working
+ * memory is O(S) and bounded by the budget. Returns null when the budget can't cover it.
  */
 function matchPath(pattern: string[], path: string[], budget: Budget): boolean | null {
   const P = pattern.length;
   const S = path.length;
-  // can[i * (S + 1) + j]: pattern[i..] matches path[j..]. Filled from the end.
-  const can = new Uint8Array((P + 1) * (S + 1));
-  const at = (i: number, j: number) => can[i * (S + 1) + j] === 1;
-  can[P * (S + 1) + S] = 1;
+  if (!spend(budget, (P + 1) * (S + 1))) return null; // can't afford it: decide before allocating
+  // next[j]: pattern[i+1..] matches path[j..]; cur[j]: pattern[i..] matches path[j..]. Filled from the end.
+  let next = new Uint8Array(S + 1);
+  let cur = new Uint8Array(S + 1);
+  next[S] = 1;
   for (let i = P - 1; i >= 0; i--) {
     const seg = pattern[i] ?? '';
     for (let j = S; j >= 0; j--) {
-      if (!spend(budget, 1)) return null;
       let ok = false;
       if (seg === '**') {
         // zero segments, or consume this path segment and stay on `**`
-        ok = at(i + 1, j) || (j < S && at(i, j + 1));
-      } else if (j < S && at(i + 1, j + 1)) {
+        ok = next[j] === 1 || (j < S && cur[j + 1] === 1);
+      } else if (j < S && next[j + 1] === 1) {
         const m = matchSegment(seg, path[j] ?? '', budget);
         if (m === null) return null;
         ok = m;
       }
-      can[i * (S + 1) + j] = ok ? 1 : 0;
+      cur[j] = ok ? 1 : 0;
     }
+    [next, cur] = [cur, next];
   }
-  return at(0, 0);
+  return next[0] === 1;
 }
 
 export function workspaceMatcher(rootEntry: unknown): (location: string) => boolean {
@@ -125,6 +127,7 @@ export function workspaceMatcher(rootEntry: unknown): (location: string) => bool
     // The project root and anything outside the repository are never workspaces.
     if (location !== '' && path.length > 0 && !path.includes('..')) {
       for (const pattern of patterns) {
+        if (budget.left <= 0) break; // spent: "not a workspace" without starting (or allocating) anything
         const m = matchPath(pattern, path, budget);
         if (m === null) break; // budget gone: "not a workspace", so the link is reported, not hidden
         if (m) {
