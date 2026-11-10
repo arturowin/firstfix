@@ -17,6 +17,7 @@ import type { AffectedRange, Severity } from '../../domain/advisory.ts';
 import type { FixStatus } from '../../domain/candidate.ts';
 import type { StoredExplanation } from '../../domain/explanation.ts';
 import type { Scope } from '../../domain/lockfile.ts';
+import { isStorableText, storableText } from '../../domain/text.ts';
 import { inTransactionOrRollback, Rollback } from './pool.ts';
 
 const TERMINAL = `('completed', 'unsupported', 'failed')`;
@@ -68,6 +69,15 @@ function toView(r: ScanRow): ScanView {
     updatedAt: r.updated_at,
     completedAt: r.completed_at,
   };
+}
+
+/**
+ * JSON for jsonb parameters, with every string made storable: PostgreSQL rejects \u0000 and unpaired surrogates,
+ * and one such value from a lockfile would otherwise abort the whole report transaction. Last line of defence;
+ * the parser already normalises what it reads.
+ */
+function storableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) => (typeof v === 'string' && !isStorableText(v) ? storableText(v, Infinity) : v));
 }
 
 /** Stored ranges in the neutral AffectedRange shape, or null for older rows that hold raw provider JSON. */
@@ -238,7 +248,7 @@ export class PostgresScanRepository implements ScanRepository {
                   title text, affected_ranges jsonb, candidate_version text, fix_status text, "references" jsonb)`,
           [
             claim.scanId,
-            JSON.stringify(
+            storableJson(
               c.findings.map((f) => ({
                 ecosystem: f.ecosystem,
                 package: f.package,
@@ -270,7 +280,7 @@ export class PostgresScanRepository implements ScanRepository {
           `INSERT INTO unchecked_deps (scan_id, ecosystem, package, version, reason)
            SELECT $1, u.ecosystem, u.package, u.version, u.reason
              FROM jsonb_to_recordset($2::jsonb) AS u(ecosystem text, package text, version text, reason text)`,
-          [claim.scanId, JSON.stringify(c.unchecked)],
+          [claim.scanId, storableJson(c.unchecked)],
         );
       }
 
@@ -291,7 +301,7 @@ export class PostgresScanRepository implements ScanRepository {
           c.counts.failedLookups,
           c.advisorySource,
           c.summaryLine,
-          c.explanation === null ? null : JSON.stringify(c.explanation),
+          c.explanation === null ? null : storableJson(c.explanation),
           c.explanation?.source ?? null,
         ],
       );

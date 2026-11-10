@@ -5,6 +5,7 @@
 import { MAX_INSTALL_PATHS, type LockedPackage, type ParseLockfileResult, type Scope, type UncheckablePackage } from '../../lockfile.ts';
 import type { LockfileFormat } from '../types.ts';
 import { buildInstallGraph, PATH_ELLIPSIS } from './graph.ts';
+import { isStorableText, storableText } from '../../text.ts';
 import { isValidNpmName } from './name.ts';
 import { workspaceMatcher } from './workspaces.ts';
 
@@ -72,9 +73,10 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
       if (target !== null && isWorkspace(target)) continue;
       const linkName = path.slice(at + NODE_MODULES.length);
       const targetEntry = target !== null ? packages[target] : undefined;
-      const linkVersion = isRecord(targetEntry) && typeof targetEntry['version'] === 'string' ? targetEntry['version'] : null;
-      const shown = linkName.slice(0, 214);
-      const reason = isValidNpmName(linkName) ? 'unsupported_source' : 'invalid_name';
+      const rawVersion = isRecord(targetEntry) && typeof targetEntry['version'] === 'string' ? targetEntry['version'] : null;
+      const linkVersion = rawVersion === null ? null : storableText(rawVersion);
+      const shown = storableText(linkName, 214);
+      const reason = isValidNpmName(linkName) && (rawVersion === null || isStorableText(rawVersion)) ? 'unsupported_source' : 'invalid_name';
       const k = `${reason}:${shown}@${linkVersion ?? ''}`;
       if (!uncheckable.has(k)) uncheckable.set(k, { name: shown, version: linkVersion, reason });
       continue;
@@ -88,10 +90,12 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
 
     // Names come from a repository-controlled file and end up in commands: anything the registry couldn't hold
     // (spaces, `;`, `$(`, quotes, …) is set aside unchecked, never looked up or put into a command.
-    if (!isValidNpmName(name) || !isValidNpmName(folderName)) {
-      const shown = (isValidNpmName(name) ? folderName : name).slice(0, 214);
-      const k = `invalid:${shown}@${ver ?? ''}`;
-      if (!uncheckable.has(k)) uncheckable.set(k, { name: shown, version: ver, reason: 'invalid_name' });
+    // A version with control characters or invalid Unicode is no registry version either; kept, shown safely.
+    if (!isValidNpmName(name) || !isValidNpmName(folderName) || (ver !== null && !isStorableText(ver))) {
+      const shown = storableText(isValidNpmName(name) ? folderName : name, 214);
+      const version = ver === null ? null : storableText(ver);
+      const k = `invalid:${shown}@${version ?? ''}`;
+      if (!uncheckable.has(k)) uncheckable.set(k, { name: shown, version, reason: 'invalid_name' });
       continue;
     }
 
