@@ -228,3 +228,22 @@ One entry per milestone (or per notable session). Keep it factual.
   - The UI groups unchecked dependencies by reason, each with its own advice; failed lookups say to scan again.
 - **Verified by:** the full suite green (typecheck, lint), including the review's backlog reproduction through
   real pg-boss, and malformed-record and batch-entry tests. UI change not browser-checked.
+
+### 2026-11-10 · M5 polish and release
+- **Agent did:**
+  - A pass over every UI state at desktop and phone width.
+  - API tests for retrying scans, a partial report over HTTP, and reports for unsupported scans.
+  - Live scans of real repositories; the README.
+  - A release check from a fresh clone: `npm ci`, typecheck, lint, tests, eval, the non-Docker
+    migrate/api/worker path, and `npm audit` on runtime dependencies (0 vulnerabilities).
+- **Found along the way:**
+  - "Why first" still said "not shipped at runtime" / "installed at runtime", the same deployment claim
+    fixed in the M3 template; it now states the lockfile classification.
+  - A clean but partial result led with "No known vulnerabilities"; it now leads with "Partial result".
+  - The findings table was unreadable at 375 px; it now scrolls inside its box.
+  - The malicious card repeated its label.
+  - `microsoft/vscode` has no root `package-lock.json` (reported as unsupported). `nestjs/nest` (1425
+    dependencies) and `npm/cli` (993, workspaces) each completed in 8 s.
+- **Still open, needs a person:** the usability check (someone unfamiliar reads a report), and a live run
+  with a real LLM key.
+- **Verified by:** 303 tests green (typecheck, lint), eval 4/4, clean-clone run.
