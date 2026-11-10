@@ -102,6 +102,24 @@ describe('HTTP API', () => {
       await limited.close();
     });
 
+    it('queue filling concurrently: same-key replays → 202/200 with one scan id, mismatched → 409, new → 503', async () => {
+      const open = (await env.pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM scans WHERE status NOT IN ('completed', 'unsupported', 'failed')`))
+        .rows[0]?.n ?? 0;
+      const capped = buildApp({
+        scans: new ScanService(new PostgresScanSubmission(env.pool, env.boss, { maxOutstanding: open + 1 }), new PostgresScanRepository(env.pool)),
+        checkReady: () => Promise.resolve(),
+        webDir,
+      });
+      const send = (repoUrl: string, key: string) =>
+        capped.inject({ method: 'POST', url: '/scans', payload: { repoUrl }, headers: { 'idempotency-key': key } });
+      const [a, b] = await Promise.all([send('https://github.com/a/last-slot', 'k-last'), send('https://github.com/a/last-slot', 'k-last')]);
+      expect([a.statusCode, b.statusCode].sort()).toEqual([200, 202]);
+      expect(a.json<{ scanId: string }>().scanId).toBe(b.json<{ scanId: string }>().scanId);
+      expect((await send('https://github.com/a/different', 'k-last')).statusCode).toBe(409);
+      expect((await send('https://github.com/a/brand-new', 'k-brand-new')).statusCode).toBe(503);
+      await capped.close();
+    });
+
     it('outstanding-scan cap → 503 busy with Retry-After', async () => {
       const full = buildApp({
         scans: new ScanService(new PostgresScanSubmission(env.pool, env.boss, { maxOutstanding: 1 }), new PostgresScanRepository(env.pool)),

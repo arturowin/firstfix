@@ -46,6 +46,13 @@ export class PostgresScanSubmission implements ScanSubmission {
       // this check-then-insert across API processes; the count uses the partial index on non-terminal rows.
       if (this.maxOutstanding !== null) {
         await client.query('SELECT pg_advisory_xact_lock($1)', [ADMISSION_LOCK]);
+        // Re-check the key under the lock: a concurrent request with the same key may have committed while we
+        // waited (it took the last slot). Its replay must get that scan (or a 409), not "busy".
+        if (idem) {
+          const again = await client.query<KeyRow>('SELECT request_hash, scan_id FROM idempotency_keys WHERE key = $1', [idem.key]);
+          const row = again.rows[0];
+          if (row) throw new Rollback(resultForExistingKey(row, idem));
+        }
         const { rows } = await client.query<{ n: number }>(
           `SELECT count(*)::int AS n FROM scans WHERE status NOT IN ('completed', 'unsupported', 'failed')`,
         );

@@ -45,6 +45,31 @@ describe('scan submission (Postgres + pg-boss)', () => {
     expect((await capped.submit('https://github.com/a/cap-2', 'k-cap-2')).kind).toBe('created');
   });
 
+  it('the same key submitted concurrently for the last slot: both get the one scan, never 503 (review finding)', async () => {
+    const openNow = async () =>
+      (await env.pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM scans WHERE status NOT IN ('completed', 'unsupported', 'failed')`))
+        .rows[0]?.n ?? 0;
+    for (let round = 0; round < 10; round++) {
+      const capped = new ScanService(
+        new PostgresScanSubmission(env.pool, env.boss, { maxOutstanding: (await openNow()) + 1 }),
+        new PostgresScanRepository(env.pool),
+      );
+      const key = `k-race-${String(round)}`;
+      const url = `https://github.com/a/race-${String(round)}`;
+      const [a, b] = await Promise.all([capped.submit(url, key), capped.submit(url, key)]);
+      const kinds = [a.kind, b.kind].sort();
+      expect(kinds).toEqual(['created', 'existing']);
+      const ids = [a, b].map((r) => ('scanId' in r ? r.scanId : null));
+      expect(ids[0]).toBe(ids[1]);
+
+      // At the cap now: a mismatched replay of the key is still a conflict, a new submission is busy.
+      expect((await capped.submit('https://github.com/a/other', key)).kind).toBe('conflict');
+      expect((await capped.submit(`${url}-new`, `${key}-new`)).kind).toBe('busy');
+      // Free the slot for the next round.
+      await env.pool.query(`UPDATE scans SET status = 'failed', error_code = 'x', error_message = 'x' WHERE id = $1`, [ids[0]]);
+    }
+  });
+
   it('creates the scan row and a job whose id is the scan id, in one go', async () => {
     const r = await service.submit('https://github.com/Owner/Repo.git', null);
     expect(r.kind).toBe('created');
