@@ -19,8 +19,8 @@ Two processes share one PostgreSQL database.
 
 - **API** (`src/api/main.ts`): HTTP routes (zod, Idempotency-Key), `ScanService`, static UI.
   Uses ports `ScanRepository`, `JobQueue`.
-- **Worker** (`src/worker/main.ts`): `ScanPipeline` = claim → resolve SHA → read lockfile @SHA →
-  OSV lookup → rank → build actions → explain → save. Uses ports `RepoSource`, `VulnDatabase`,
+- **Worker** (`src/worker/main.ts`): `ScanPipeline` = claim → resolve SHA → find a supported lockfile @SHA →
+  parse with its ecosystem's format → OSV lookup → rank → build actions → explain → save. Uses ports `RepoSource`, `VulnDatabase`,
   `Explainer`, `ScanRepository`.
 - **Adapters**: GitHub REST API, OSV.dev, LLM (+ template fallback), Postgres, pg-boss.
 - Plain composition root per process; no DI framework. Contract tests show adapters are substitutable.
@@ -29,6 +29,7 @@ Two processes share one PostgreSQL database.
 ```
 scans(id uuid pk,            -- also the pg-boss job id (send({ id })), same submission tx
       repo_owner, repo_name, repo_url_normalized, commit_sha null,
+      lockfile_path null,         -- which lockfile was scanned, e.g. 'package-lock.json' (M2, migration 002)
       status, stage null, attempt int default 0,
       total_deps int, checked_deps int, unsupported_deps int, failed_lookups int,
       coverage null,              -- 'full' | 'partial'
@@ -36,7 +37,9 @@ scans(id uuid pk,            -- also the pg-boss job id (send({ id })), same sub
       summary_line text null, error_code null, error_message null,
       created_at, updated_at, completed_at null)
 
-findings(id pk, scan_id fk, package, installed_version,
+findings(id pk, scan_id fk,
+         ecosystem,                -- OSV ecosystem name, 'npm' (M2, migration 002; in the unique key)
+         package, installed_version,
          scope,                    -- 'runtime' | 'optional' | 'dev' (most exposed path)
          is_direct bool,           -- true if any install path is direct
          direct_parents text[],    -- all direct deps that pull it in (empty if direct)
@@ -45,7 +48,7 @@ findings(id pk, scan_id fk, package, installed_version,
          title, affected_ranges jsonb, candidate_version null, references jsonb,
          explanation null)
 
-unchecked_deps(scan_id fk, package, version null, reason)   -- 'unsupported_source' | 'lookup_failed'
+unchecked_deps(scan_id fk, ecosystem, package, version null, reason)   -- 'unsupported_source' | 'lookup_failed'
 
 idempotency_keys(key pk, request_hash, scan_id fk, created_at)
 ```
@@ -151,11 +154,45 @@ Everything below is tested there unless marked as read from the source or as a p
 - `full` coverage = every supported dependency in the root lockfile was checked. Says nothing about the
   rest of the repository.
 
+### Ecosystems (npm implemented; others can be added without touching the pipeline)
+Only npm is implemented. The ecosystem-specific parts sit behind small seams so another ecosystem is a
+few pure modules plus a registry entry, not a rewrite. Everything else (ranking, malicious handling,
+attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
+
+- **Ecosystem id = OSV's ecosystem name** (`npm`, later e.g. `PyPI`, `crates.io`, `RubyGems`, `Go`,
+  `Packagist`, `NuGet`). No mapping table; the OSV adapter passes it through.
+- **Lockfile format** (pure, `src/domain/ecosystems/`): `{ ecosystem, fileNames, parse(text) }`, returning the
+  existing `ParseLockfileResult` with `ecosystem` on each package. A registry lists the supported formats in
+  priority order; today only `package-lock.json`. A second format for the same ecosystem (`yarn.lock`,
+  `pnpm-lock.yaml`) is another entry. Parsing does no I/O, so formats live in `domain/`, not behind a port.
+- **Version scheme** per ecosystem: `compare`, `isMajorJump`, `inRange(version, osvRange)`. npm uses `semver`.
+  An ecosystem without a scheme still reports findings, but with no candidate version and no major-jump
+  flag ("see the advisory for fixed versions"); never a guessed version.
+- **Remediation hints** per ecosystem (pure): the upgrade command for the agent prompt
+  (`npm install <pkg>@<version>`) and the CI tool for the clean result (Dependabot / `npm audit`).
+- **Ports are ecosystem-neutral:** `RepoSource.readFile(repo, sha, path)` (pinned to the SHA, replaces
+  `readLockfile`); `VulnDatabase.lookup` takes `{ ecosystem, name, version }`, keyed `ecosystem:name@version`
+  so ecosystems can't collide.
+- **Detection:** the pipeline tries each registered format's `fileNames` at the repo root, in registry order,
+  and scans the first found. None found → `unsupported` naming the supported files. The scanned path is
+  stored in `scans.lockfile_path` and shown beside coverage.
+- **One lockfile per scan.** Scanning several (e.g. npm + Python in one repo) needs per-lockfile coverage;
+  out of scope, stated in README.
+- **Lockfile ecosystems only.** OSV needs exact versions. Ecosystems with lockfiles (Cargo.lock, poetry.lock /
+  uv.lock, Gemfile.lock, composer.lock, packages.lock.json, go.mod) fit these seams. Manifests with ranges and
+  no lock (plain `requirements.txt`, Maven `pom.xml`) need dependency resolution first: a different problem.
+- **Proof:** a test-only fake ecosystem (own file name, parser, version scheme) goes through the pipeline with
+  GitHub and OSV mocked; nothing outside the registry changes.
+- Not adopted (possible later): one pinned `GET /repos/{o}/{r}/git/trees/{sha}` to list root files, so an
+  unsupported repo gets "found poetry.lock (PyPI): not supported yet". Costs one call of the 60/hour
+  unauthenticated limit.
+
 ### GitHub fetching
 - Resolve SHA (two calls): `GET /repos/{owner}/{repo}` for the default branch (also detects not found/private),
   then `GET /repos/{owner}/{repo}/commits/{default_branch}` for its SHA.
-- Read the lockfile by SHA from `https://raw.githubusercontent.com/{owner}/{repo}/{sha}/package-lock.json`
-  (the contents API won't inline files over 1 MB). Still follows the pinned-SHA rule.
+- Read the lockfile by SHA from `https://raw.githubusercontent.com/{owner}/{repo}/{sha}/{path}`, where `path`
+  comes from the lockfile-format registry (the contents API won't inline files over 1 MB). Still follows the
+  pinned-SHA rule.
 - Optional `GITHUB_TOKEN` (unauthenticated limit is 60 requests/hour/IP). Works without it.
 - 404 → `failed`, message "repository not found or private" (GitHub returns 404 for both).
 - 403/429 with rate-limit headers (`x-ratelimit-remaining: 0`, `retry-after`) → transient, retry.
@@ -187,7 +224,8 @@ Everything below is tested there unless marked as read from the source or as a p
   (e.g. 8), timeout + retry per call.
 - Shapes verified in M0 (fixtures in `test/fixtures/osv/`):
   - One advisory lists many `affected` entries: other packages and other ecosystems (e.g. lodash advisory
-    also covers `lodash-es`, `lodash-rails`/RubyGems). Use only entries with `ecosystem: npm` and the exact name.
+    also covers `lodash-es`, `lodash-rails`/RubyGems). Use only entries with the scanned package's ecosystem
+    and the exact name.
   - The same package can appear in several `affected` entries with different ranges (axios: `0.8.1–0.28.0`
     and `1.0.0–1.6.0`). Candidate selection looks at every matching entry and picks the range that
     contains the installed version.
@@ -213,8 +251,9 @@ Fix information shapes the action, not the rank.
 
 ### Recommended next actions
 - Group by package. At most three on the summary; the rest below.
-- Candidate version = the fix event in the affected range that contains the installed version.
-  Labelled "candidate"; compatibility, resolution and tests still to verify. Flag major-version jumps.
+- Candidate version = the fix event in the affected range that contains the installed version, using the
+  ecosystem's version scheme. Labelled "candidate"; compatibility, resolution and tests still to verify.
+  Flag major-version jumps. No version scheme for the ecosystem → no candidate (see "Ecosystems").
 - Transitive package → name the direct parent that pulls it in.
 - No fix event → "no fixed version published: review the advisory and upstream guidance, assess exposure".
 - Counts say "addresses N advisories according to advisory data"; only a rescan confirms.
@@ -234,7 +273,7 @@ Fix information shapes the action, not the rank.
 ### Coding-agent handoff prompt
 Built from a template (no AI). Includes: repo, commit, packages with evidence; candidate changes
 separated from facts; instructions to inspect the dependency graph first, keep unrelated changes,
-use `npm install <pkg>@<version>`, stop and report on major-version jumps, run tests, rescan, report
+use the ecosystem's upgrade command (npm: `npm install <pkg>@<version>`), stop and report on major-version jumps, run tests, rescan, report
 unresolved items. User sees a preview before copying.
 
 ## Report layout (frozen order)
@@ -245,7 +284,8 @@ unresolved items. User sees a preview before copying.
 5. Copy coding-agent prompt (preview) / Scan again
 
 Clean result: "No known vulnerabilities in N of M dependencies checked at commit X on <date>", what
-wasn't checked, advisories change over time → rescan, suggest Dependabot / `npm audit` in CI.
+wasn't checked, advisories change over time → rescan, suggest the ecosystem's CI check (npm: Dependabot /
+`npm audit`).
 Never says "secure". Partial clean is never shown as clean overall.
 
 ## API (sketch)
@@ -258,4 +298,6 @@ Never says "secure". Partial clean is never shown as clean overall.
 ## Known limits (state in README)
 - No rate limiting on `POST /scans`; worker concurrency set via pg-boss options only.
 - Idempotency keys are kept indefinitely (no retention job).
-- Public github.com repos only; root `package-lock.json` only.
+- Public github.com repos only; root `package-lock.json` only (npm is the only implemented ecosystem; the
+  seams for others are described under "Ecosystems").
+- One lockfile per scan; manifests without a lockfile (ranges, no exact versions) are not supported.

@@ -28,6 +28,16 @@ Rule: one milestone at a time. A milestone is done only when its gate passes and
 Tests: URL normalization, idempotency (incl. 409), lockfile parser basics, one integration test with GitHub + OSV mocked.
 
 ## M2 · Actionable report
+- [ ] First: ecosystem seams (ARCHITECTURE.md "Ecosystems"; npm stays the only implementation, ~half a day)
+      - migration `002_ecosystem.sql`: `ecosystem text NOT NULL DEFAULT 'npm'` on `findings` and `unchecked_deps`
+        (in `findings_unique`), `scans.lockfile_path`; repository reads/writes both
+      - ports: `RepoSource.readFile(repo, sha, path)` replaces `readLockfile`; `VulnDatabase.lookup` takes
+        `{ ecosystem, name, version }`, key `ecosystem:name@version`
+      - OSV adapter: ecosystem passed through in queries and `affected` filtering (no hardcoded `'npm'`)
+      - `src/domain/ecosystems/`: lockfile-format registry; current parser becomes the npm `package-lock.json` format
+      - pipeline: try registered formats in order, store `lockfile_path`; error/UI copy derived from the registry
+      - candidate selection, major-jump flag, agent-prompt command and clean-result CI hint (below) are written
+        against the npm `VersionScheme` / remediation hints from the start
 - [ ] Only lockfileVersion 2/3 supported; others → `unsupported` with reason
 - [ ] Lockfile parsing rules from ARCHITECTURE.md (link, sources, dev/optional/devOptional, direct, dedupe, path aggregation)
 - [ ] OSV chunking (≤1000), pagination, detail fetch deduped with a concurrency limit, failed-lookup accounting
@@ -42,6 +52,9 @@ Tests: URL normalization, idempotency (incl. 409), lockfile parser basics, one i
 **Gate:** someone reading the report knows what to do first and what was checked.
 Tests: lockfile parser (each rule), ranking policy, candidate-version selection (multiple ranges, no fix,
 several advisories on one package, major jump), grouping, malicious path, prompt template snapshot.
+Ecosystem seams: a test-only fake ecosystem through the pipeline (GitHub + OSV mocked) with nothing outside the
+registry changed; OSV adapter passes the ecosystem through and filters `affected` by it; migration 002 keeps
+existing rows as `npm` and the unique key includes the ecosystem; all existing npm tests unchanged.
 
 ## If time runs short — cut in this order
 1. Shrink `npm run eval` to 3 fixtures
@@ -74,5 +87,6 @@ Never cut a test while keeping the claim it proves. If a guarantee isn't tested,
 - [ ] Unit + integration + adapter contract tests complete
 - [ ] README: Product interpretation → Assumptions → Quick start (Docker and non-Docker) → Demo repo → Architecture → Decisions → Failure behavior → Limits → Next steps → How I used coding agents (from AGENT_LOG)
 - [ ] Demo fixture repo linked, with a warning not to `npm install` it; tested end to end; one real popular repo also tried
-- [ ] README Limits: no rate limit on POST /scans, worker concurrency, idempotency key retention, GHSA-only severity
+- [ ] README Limits: no rate limit on POST /scans, worker concurrency, idempotency key retention, GHSA-only severity,
+      npm only (ecosystem seams ready; lockfile ecosystems vs resolve-first ones), one lockfile per scan
 - [ ] Usability check: show the report to someone unfamiliar; ask what they'd do first and why, what was checked, what's uncertain. Fix confusion.
