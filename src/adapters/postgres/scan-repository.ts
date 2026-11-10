@@ -95,6 +95,7 @@ export class PostgresScanRepository implements ScanRepository {
       scope: Scope;
       is_direct: boolean;
       direct_parents: string[];
+      install_paths: string[][];
       advisory_id: string;
       aliases: string[];
       severity: Severity;
@@ -104,7 +105,7 @@ export class PostgresScanRepository implements ScanRepository {
       fix_status: FixStatus;
       references: { type: string; url: string }[];
     }>(
-      `SELECT ecosystem, package, installed_version, scope, is_direct, direct_parents, advisory_id, aliases, severity,
+      `SELECT ecosystem, package, installed_version, scope, is_direct, direct_parents, install_paths, advisory_id, aliases, severity,
               is_malicious, title, candidate_version, fix_status, "references"
          FROM findings WHERE scan_id = $1 ORDER BY ecosystem, package, installed_version, advisory_id`,
       [scanId],
@@ -124,6 +125,7 @@ export class PostgresScanRepository implements ScanRepository {
           scope: f.scope,
           isDirect: f.is_direct,
           directParents: f.direct_parents,
+          installPaths: f.install_paths,
           advisoryId: f.advisory_id,
           aliases: f.aliases,
           severity: f.severity,

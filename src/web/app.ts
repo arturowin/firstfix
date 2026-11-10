@@ -1,32 +1,71 @@
-// Minimal M1 page: submit, follow progress, list findings. The full report layout comes in M2.
+// Submit, follow progress, and show the report in the frozen layout (docs/ARCHITECTURE.md "Report layout"):
+// 1. summary + date + commit + coverage + advisory source, 2. up to three next actions, 3. evidence per action,
+// 4. all findings + unchecked dependencies, 5. coding-agent prompt preview / scan again.
 // All API data is rendered with textContent / attributes, never innerHTML.
+
+type Severity = 'critical' | 'high' | 'medium' | 'low' | 'unknown';
+type Scope = 'runtime' | 'optional' | 'dev';
+type FixStatus = 'candidate' | 'no_fix' | 'unknown';
 
 interface ScanJson {
   id: string;
   repo: { url: string };
   commitSha: string | null;
+  lockfilePath: string | null;
+  advisorySource: string | null;
   status: 'queued' | 'running' | 'retrying' | 'completed' | 'unsupported' | 'failed';
   stage: 'fetching' | 'scanning' | 'analyzing' | null;
   counts: { totalDeps: number; checkedDeps: number; unsupportedDeps: number; failedLookups: number };
+  coverage: 'full' | 'partial' | null;
   error: { code: string; message: string } | null;
   completedAt: string | null;
 }
 
 interface FindingJson {
+  ecosystem: string;
   package: string;
   installedVersion: string;
-  scope: 'runtime' | 'optional' | 'dev';
+  scope: Scope;
   isDirect: boolean;
+  directParents: string[];
+  installPaths: string[][];
   advisoryId: string;
-  severity: string;
+  aliases: string[];
+  severity: Severity;
   isMalicious: boolean;
   title: string | null;
+  candidateVersion: string | null;
+  fixStatus: FixStatus;
+}
+
+interface ActionVersionJson {
+  installedVersion: string;
+  scope: Scope;
+  isDirect: boolean;
+  directParents: string[];
+  advisories: { id: string; severity: Severity; title: string | null; fixStatus: FixStatus; candidateVersion: string | null }[];
+}
+
+interface ActionJson {
+  rank: number;
+  kind: 'remove_malicious' | 'upgrade' | 'no_fix' | 'review';
+  ecosystem: string;
+  package: string;
+  severity: Severity;
+  isMalicious: boolean;
+  onSummary: boolean;
+  versions: ActionVersionJson[];
+  text: { headline: string; steps: string[]; why: string; verify: string } | null;
 }
 
 interface ReportJson {
   scan: ScanJson;
+  summary: string | null;
+  ciChecks: string[];
+  actions: ActionJson[];
   findings: FindingJson[];
-  unchecked: { package: string; version: string | null; reason: string }[];
+  unchecked: { ecosystem: string; package: string; version: string | null; reason: 'unsupported_source' | 'lookup_failed' }[];
+  agentPrompt: string | null;
 }
 
 const TERMINAL = new Set(['completed', 'unsupported', 'failed']);
@@ -51,6 +90,23 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, classN
   return node;
 }
 
+function link(text: string, href: string): HTMLAnchorElement {
+  const a = el('a', text);
+  a.href = href;
+  a.rel = 'noopener noreferrer';
+  a.target = '_blank';
+  return a;
+}
+
+/** Renders `code` spans from backticks in our own deterministic text (still textContent only). */
+function richText(tag: 'p' | 'li' | 'div', text: string, className?: string): HTMLElement {
+  const node = el(tag, undefined, className);
+  text.split('`').forEach((part, i) => {
+    if (part) node.append(i % 2 === 1 ? el('code', part) : part);
+  });
+  return node;
+}
+
 async function api(path: string, init?: RequestInit): Promise<{ status: number; body: unknown }> {
   const headers = new Headers(init?.headers);
   headers.set('accept', 'application/json');
@@ -63,13 +119,12 @@ let pending: { url: string; key: string } | null = null;
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
-  void submit();
+  void submit(input.value.trim());
 });
 
-async function submit(): Promise<void> {
-  const repoUrl = input.value.trim();
+async function submit(repoUrl: string, fresh = false): Promise<void> {
   formError.textContent = '';
-  if (!pending || pending.url !== repoUrl) pending = { url: repoUrl, key: crypto.randomUUID() };
+  if (fresh || !pending || pending.url !== repoUrl) pending = { url: repoUrl, key: crypto.randomUUID() };
   button.disabled = true;
   try {
     const res = await api('/scans', {
@@ -77,14 +132,13 @@ async function submit(): Promise<void> {
       headers: { 'content-type': 'application/json', 'idempotency-key': pending.key },
       body: JSON.stringify({ repoUrl }),
     });
-    const status = res.status;
     const body = res.body as { scanId?: string; error?: { message: string } };
-    if ((status === 202 || status === 200) && body.scanId) {
+    if ((res.status === 202 || res.status === 200) && body.scanId) {
       pending = null;
       history.pushState(null, '', `/scans/${body.scanId}`);
       void follow(body.scanId);
     } else {
-      formError.textContent = body.error?.message ?? `Request failed (${status})`;
+      formError.textContent = body.error?.message ?? `Request failed (${String(res.status)})`;
     }
   } catch {
     formError.textContent = 'Could not reach the server. Try again.';
@@ -113,6 +167,7 @@ async function follow(scanId: string): Promise<void> {
       continue;
     }
     if (TERMINAL.has(scan.status)) {
+      if (input.value === '') input.value = scan.repo.url;
       if (scan.status === 'completed') {
         const { body } = await api(`/scans/${scanId}/report`);
         renderReport(body as ReportJson);
@@ -130,24 +185,20 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function header(scan: ScanJson): HTMLElement {
-  const box = el('div', undefined, 'status');
-  const title = el('div');
-  const link = el('a', scan.repo.url);
-  link.href = scan.repo.url;
-  link.rel = 'noopener noreferrer';
-  title.append(link);
+function repoTitle(scan: ScanJson): HTMLElement {
+  const title = el('div', undefined, 'repo');
+  const a = link(scan.repo.url, scan.repo.url);
+  title.append(a);
   if (scan.commitSha) title.append(' at commit ', el('code', scan.commitSha.slice(0, 7)));
-  box.append(title);
-  return box;
+  return title;
 }
 
 function renderMessage(text: string): void {
-  result.replaceChildren(el('div', text, 'status'));
+  result.replaceChildren(el('div', text, 'card'));
 }
 
 function renderProgress(scan: ScanJson): void {
-  const box = header(scan);
+  const box = el('div', undefined, 'card');
   const c = scan.counts;
   const line =
     scan.status === 'queued'
@@ -155,66 +206,246 @@ function renderProgress(scan: ScanJson): void {
       : scan.status === 'retrying'
         ? 'A temporary problem occurred; retrying…'
         : scan.stage === 'fetching'
-          ? 'Fetching package-lock.json…'
+          ? 'Fetching the lockfile…'
           : scan.stage === 'scanning'
-            ? `Checking ${c.totalDeps - c.unsupportedDeps} dependencies against OSV…`
+            ? `Checking ${String(c.totalDeps - c.unsupportedDeps)} dependencies against advisory data…`
             : 'Preparing results…';
-  box.append(el('div', line, 'muted'));
+  box.append(repoTitle(scan), el('div', line, 'muted'));
   result.replaceChildren(box);
 }
 
 function renderOutcome(scan: ScanJson): void {
-  const box = header(scan);
+  const box = el('div', undefined, 'card');
   const label = scan.status === 'unsupported' ? 'Could not scan this repository' : 'Scan failed';
-  box.append(el('div', label, 'error'), el('div', scan.error?.message ?? ''));
+  box.append(repoTitle(scan), el('div', label, 'error'), el('div', scan.error?.message ?? ''), scanAgainButton(scan));
   result.replaceChildren(box);
 }
 
-function renderReport(report: ReportJson): void {
-  const { scan, findings, unchecked } = report;
-  const box = header(scan);
-  const c = scan.counts;
-  const date = scan.completedAt ? new Date(scan.completedAt).toLocaleString() : '';
-  const packages = new Set(findings.map((f) => `${f.package}@${f.installedVersion}`)).size;
-  box.append(
-    el(
-      'div',
-      findings.length === 0
-        ? `No known vulnerabilities in ${c.checkedDeps} of ${c.totalDeps} dependencies checked (${date}).`
-        : `${findings.length} advisories affect ${packages} package versions (${c.checkedDeps} of ${c.totalDeps} dependencies checked, ${date}).`,
-    ),
-  );
-  if (c.unsupportedDeps > 0) {
-    box.append(el('div', `Not checked: ${unchecked.map((u) => u.package).join(', ')} (non-registry source).`, 'muted'));
-  }
-  const nodes: HTMLElement[] = [box];
+const dateOf = (scan: ScanJson) => (scan.completedAt ? new Date(scan.completedAt).toLocaleString() : '');
 
-  if (findings.length > 0) {
-    const table = el('table');
-    const head = el('tr');
-    for (const h of ['Package', 'Version', 'Severity', 'Advisory', 'Dependency']) head.append(el('th', h));
-    table.append(el('thead'), el('tbody'));
-    table.tHead?.append(head);
-    for (const f of findings) {
-      const row = el('tr');
-      row.append(el('td', f.package), el('td', f.installedVersion));
-      row.append(
-        f.isMalicious ? el('td', 'malicious', 'mal') : el('td', f.severity, `sev-${f.severity}`),
-      );
-      const adv = el('td');
-      const a = el('a', f.advisoryId);
-      a.href = `https://osv.dev/vulnerability/${encodeURIComponent(f.advisoryId)}`;
-      a.rel = 'noopener noreferrer';
-      a.target = '_blank';
-      adv.append(a);
-      if (f.title) adv.append(el('div', f.title, 'muted'));
-      row.append(adv, el('td', `${f.isDirect ? 'direct' : 'transitive'}, ${f.scope}`));
-      table.tBodies[0]?.append(row);
-    }
-    const wrap = el('div', undefined, 'table-wrap');
-    wrap.append(table);
-    nodes.push(wrap);
+/** 1. Summary line, with date, commit, lockfile, coverage and advisory source always beside it. */
+function summaryCard(report: ReportJson): HTMLElement {
+  const { scan } = report;
+  const c = scan.counts;
+  const box = el('section', undefined, 'card');
+  box.append(repoTitle(scan));
+  box.append(el('p', report.summary ?? '', 'summary'));
+  const meta = el('ul', undefined, 'meta');
+  const coverage =
+    scan.coverage === 'partial'
+      ? `Coverage: partial (${String(c.checkedDeps)} of ${String(c.totalDeps)} checked)`
+      : `Coverage: ${String(c.checkedDeps)} of ${String(c.totalDeps)} dependencies checked`;
+  for (const item of [
+    `Scanned ${dateOf(scan)}`,
+    scan.lockfilePath ? `Lockfile: ${scan.lockfilePath}` : null,
+    coverage,
+    scan.advisorySource ? `Advisory data: ${scan.advisorySource}` : null,
+  ]) {
+    if (item) meta.append(el('li', item));
   }
+  box.append(meta);
+  if (c.unsupportedDeps > 0) {
+    box.append(
+      el('p', `Not checked (non-registry source): ${report.unchecked.map((u) => u.package).join(', ')}.`, 'muted'),
+    );
+  }
+  return box;
+}
+
+const KIND_LABEL: Record<ActionJson['kind'], string> = {
+  remove_malicious: 'Malicious',
+  upgrade: 'Upgrade',
+  no_fix: 'No fix published',
+  review: 'Review',
+};
+
+function severityTag(severity: Severity, malicious: boolean): HTMLElement {
+  return malicious ? el('span', 'malicious', 'tag mal') : el('span', severity, `tag sev-${severity}`);
+}
+
+/** 2 + 3. One recommended action: what, why first, how to verify; evidence expandable. */
+function actionCard(a: ActionJson, findings: FindingJson[]): HTMLElement {
+  const card = el('article', undefined, `action action-${a.kind}`);
+  const head = el('div', undefined, 'action-head');
+  head.append(el('span', String(a.rank), 'rank'), severityTag(a.severity, a.isMalicious), el('span', KIND_LABEL[a.kind], 'kind'));
+  card.append(head);
+  if (a.text) {
+    card.append(el('h3', a.text.headline));
+    const steps = el('ul', undefined, 'steps');
+    for (const s of a.text.steps) steps.append(richText('li', s));
+    card.append(steps);
+    card.append(labelled('Why first', a.text.why), labelled('How to verify', a.text.verify));
+  } else {
+    card.append(el('h3', `${a.package} (${a.ecosystem})`), el('p', 'See the advisories for fixed versions.', 'muted'));
+  }
+
+  const evidence = el('details', undefined, 'evidence');
+  evidence.append(el('summary', `Evidence: ${String(a.versions.reduce((n, v) => n + v.advisories.length, 0))} advisory records`));
+  for (const v of a.versions) {
+    const f = findings.find((x) => x.ecosystem === a.ecosystem && x.package === a.package && x.installedVersion === v.installedVersion);
+    const block = el('div', undefined, 'evidence-version');
+    block.append(
+      el('div', `${a.package} ${v.installedVersion} · ${v.scope} · ${v.isDirect ? 'direct' : `via ${v.directParents.join(', ')}`}`, 'strong'),
+    );
+    const paths = f?.installPaths ?? [];
+    if (paths.length > 0) block.append(el('div', `Install path: ${paths.map((p) => p.join(' › ')).join('  |  ')}`, 'muted'));
+    const list = el('ul');
+    for (const adv of v.advisories) {
+      const li = el('li');
+      li.append(link(adv.id, `https://osv.dev/vulnerability/${encodeURIComponent(adv.id)}`), ' ', severityTag(adv.severity, false));
+      if (adv.title) li.append(' ', adv.title);
+      li.append(
+        el(
+          'span',
+          adv.fixStatus === 'candidate'
+            ? ` · candidate ${adv.candidateVersion ?? ''}`
+            : adv.fixStatus === 'no_fix'
+              ? ' · no fixed version published'
+              : ' · see the advisory for fixed versions',
+          'muted',
+        ),
+      );
+      list.append(li);
+    }
+    block.append(list);
+    evidence.append(block);
+  }
+  card.append(evidence);
+  return card;
+}
+
+function labelled(label: string, text: string): HTMLElement {
+  const p = richText('p', `${label}: ${text}`, 'labelled');
+  return p;
+}
+
+/** 4. All findings (ranked) and the dependencies that were not checked. */
+function findingsSection(report: ReportJson): HTMLElement {
+  const section = el('section');
+  section.append(el('h2', `All findings (${String(report.findings.length)})`));
+  const table = el('table');
+  const head = el('tr');
+  for (const h of ['Package', 'Version', 'Severity', 'Advisory', 'Dependency', 'Candidate']) head.append(el('th', h));
+  table.append(el('thead'), el('tbody'));
+  table.tHead?.append(head);
+  for (const f of report.findings) {
+    const row = el('tr');
+    row.append(el('td', f.package), el('td', f.installedVersion));
+    const sev = el('td');
+    sev.append(severityTag(f.severity, f.isMalicious));
+    const adv = el('td');
+    adv.append(link(f.advisoryId, `https://osv.dev/vulnerability/${encodeURIComponent(f.advisoryId)}`));
+    if (f.title) adv.append(el('div', f.title, 'muted'));
+    const dep = `${f.isDirect ? 'direct' : `via ${f.directParents.join(', ') || '?'}`}, ${f.scope}`;
+    const candidate = f.fixStatus === 'candidate' ? (f.candidateVersion ?? '') : f.fixStatus === 'no_fix' ? 'none published' : 'see advisory';
+    row.append(sev, adv, el('td', dep), el('td', candidate));
+    table.tBodies[0]?.append(row);
+  }
+  const wrap = el('div', undefined, 'table-wrap');
+  wrap.append(table);
+  section.append(wrap);
+  if (report.unchecked.length > 0) section.append(uncheckedList(report));
+  return section;
+}
+
+function uncheckedList(report: ReportJson): HTMLElement {
+  const box = el('div');
+  box.append(el('h3', `Not checked (${String(report.unchecked.length)})`));
+  const list = el('ul');
+  for (const u of report.unchecked) {
+    const why = u.reason === 'unsupported_source' ? 'installed from a non-registry source (git, file or other URL)' : 'advisory lookup failed';
+    list.append(el('li', `${u.package}${u.version ? ` ${u.version}` : ''}: ${why}`));
+  }
+  box.append(list);
+  return box;
+}
+
+/** 5. Coding-agent prompt: preview before copy. */
+function promptSection(report: ReportJson): HTMLElement {
+  const section = el('section', undefined, 'card');
+  section.append(el('h2', 'Hand off to a coding agent'));
+  section.append(el('p', 'A prompt built from the findings above (no AI). Read it before you paste it.', 'muted'));
+  const preview = el('details');
+  preview.append(el('summary', 'Preview prompt'), el('pre', report.agentPrompt ?? ''));
+  const copy = el('button', 'Copy prompt', 'secondary');
+  copy.type = 'button';
+  copy.addEventListener('click', () => {
+    void navigator.clipboard.writeText(report.agentPrompt ?? '').then(
+      () => {
+        copy.textContent = 'Copied';
+        setTimeout(() => (copy.textContent = 'Copy prompt'), 2000);
+      },
+      () => {
+        preview.open = true;
+        copy.textContent = 'Copy failed: select the text in the preview';
+      },
+    );
+  });
+  const row = el('div', undefined, 'row');
+  row.append(copy, scanAgainButton(report.scan));
+  section.append(preview, row);
+  return section;
+}
+
+function scanAgainButton(scan: ScanJson): HTMLButtonElement {
+  const again = el('button', 'Scan again', 'secondary');
+  again.type = 'button';
+  again.addEventListener('click', () => {
+    input.value = scan.repo.url;
+    void submit(scan.repo.url, true);
+  });
+  return again;
+}
+
+/** Clean result: what was checked, what wasn't, and why to rescan. Never "secure"; partial is never clean. */
+function cleanCard(report: ReportJson): HTMLElement {
+  const { scan } = report;
+  const c = scan.counts;
+  const box = el('section', undefined, 'card');
+  box.append(repoTitle(scan));
+  if (c.totalDeps === 0) {
+    box.append(el('p', report.summary ?? 'No dependencies to check.', 'summary'));
+  } else {
+    const at = scan.commitSha ? ` at commit ${scan.commitSha.slice(0, 7)}` : '';
+    const partial = scan.coverage === 'partial' ? ' (partial: some dependencies could not be checked, see below)' : '';
+    box.append(
+      el('p', `No known vulnerabilities in ${String(c.checkedDeps)} of ${String(c.totalDeps)} dependencies checked${at} on ${dateOf(scan)}${partial}.`, 'summary'),
+    );
+  }
+  const notes = el('ul', undefined, 'notes');
+  notes.append(
+    el('li', `Checked: ${scan.lockfilePath ?? 'the lockfile'} against ${scan.advisorySource ?? 'advisory data'}. Other files and code in the repository were not reviewed.`),
+    el('li', 'Advisories are published all the time: rescan later, or after dependency changes.'),
+  );
+  if (report.ciChecks.length > 0) notes.append(richText('li', `To catch new advisories automatically, add ${report.ciChecks.join(' or ')}.`));
+  box.append(notes);
+  if (report.unchecked.length > 0) box.append(uncheckedList(report));
+  const row = el('div', undefined, 'row');
+  row.append(scanAgainButton(scan));
+  box.append(row);
+  return box;
+}
+
+function renderReport(report: ReportJson): void {
+  if (report.findings.length === 0) {
+    result.replaceChildren(cleanCard(report));
+    return;
+  }
+  const nodes: HTMLElement[] = [summaryCard(report)];
+
+  const top = report.actions.filter((a) => a.onSummary);
+  const rest = report.actions.filter((a) => !a.onSummary);
+  const actions = el('section');
+  actions.append(el('h2', 'Recommended next actions'));
+  for (const a of top) actions.append(actionCard(a, report.findings));
+  if (rest.length > 0) {
+    const more = el('details', undefined, 'more');
+    more.append(el('summary', `${String(rest.length)} more ${rest.length === 1 ? 'action' : 'actions'}`));
+    for (const a of rest) more.append(actionCard(a, report.findings));
+    actions.append(more);
+  }
+  nodes.push(actions, findingsSection(report));
+  if (report.agentPrompt) nodes.push(promptSection(report));
   result.replaceChildren(...nodes);
 }
 

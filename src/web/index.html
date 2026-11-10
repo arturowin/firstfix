@@ -36,13 +36,40 @@
       button { padding: 10px 16px; font: inherit; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
       button:disabled { opacity: 0.6; cursor: default; }
       .error { color: var(--bad); margin-top: 8px; }
-      .status { margin-top: 20px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; }
+      .card { margin-top: 20px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; }
+      .repo { font-weight: 600; overflow-wrap: anywhere; }
+      .summary { font-size: 17px; font-weight: 600; margin: 8px 0; }
+      .meta { display: flex; flex-wrap: wrap; gap: 4px 16px; list-style: none; padding: 0; margin: 0; color: var(--muted); font-size: 14px; }
       .muted { color: var(--muted); }
-      table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px; }
+      .strong { font-weight: 600; }
+      h2 { font-size: 18px; margin: 28px 0 8px; }
+      .card h2 { margin-top: 0; }
+      h3 { font-size: 16px; margin: 6px 0; overflow-wrap: anywhere; }
+      .action { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; }
+      .action-remove_malicious { border-left-color: var(--bad); }
+      .action-no_fix, .action-review { border-left-color: var(--warn); }
+      .action-head { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+      .rank { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--line); font-weight: 600; }
+      .kind { color: var(--muted); }
+      .tag { padding: 1px 6px; border-radius: 4px; border: 1px solid currentColor; font-size: 12px; text-transform: uppercase; letter-spacing: .02em; }
+      .steps { margin: 6px 0; padding-left: 20px; }
+      .steps li { margin: 4px 0; overflow-wrap: anywhere; }
+      .labelled { margin: 6px 0; }
+      details { margin-top: 8px; }
+      summary { cursor: pointer; color: var(--accent); }
+      .evidence-version { margin: 8px 0 0 4px; font-size: 14px; }
+      .evidence-version ul { margin: 4px 0; padding-left: 20px; }
+      .more > .action { margin-left: 0; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+      button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+      pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; max-height: 420px; overflow: auto; }
+      .notes { padding-left: 20px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
       th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
       th { color: var(--muted); font-weight: 600; }
       .sev-critical, .sev-high, .mal { color: var(--bad); font-weight: 600; }
       .sev-medium { color: var(--warn); }
+      .sev-low, .sev-unknown { color: var(--muted); }
       a { color: var(--accent); }
       code { font-size: 13px; }
       .table-wrap { overflow-x: auto; }

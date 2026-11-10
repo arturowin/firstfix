@@ -53,6 +53,7 @@ export interface FindingView {
   scope: Scope;
   isDirect: boolean;
   directParents: string[];
+  installPaths: string[][];
   advisoryId: string;
   aliases: string[];
   severity: Severity;

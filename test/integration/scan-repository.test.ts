@@ -102,6 +102,7 @@ describe('PostgresScanRepository: attempt ownership', () => {
         scope: 'runtime',
         isDirect: true,
         directParents: [],
+        installPaths: [['lodash']],
         advisoryId: 'GHSA-29mw-wpgm-hmr9',
         aliases: ['CVE-2020-28500'],
         severity: 'medium',
