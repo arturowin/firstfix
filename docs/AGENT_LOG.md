@@ -190,3 +190,26 @@ One entry per milestone (or per notable session). Keep it factual.
   - The AI prompt gained the same two rules (scope is a classification; only the action's own evidence).
 - **Verified by:** 274 tests green (including both reproductions at the unit and pipeline level), lint,
   typecheck; eval 4/4 with the template. A live AI run and a browser walkthrough are still pending.
+
+### 2026-11-10 · M4 failure behaviour
+- **Agent did:**
+  - Partial advisory lookups. `lookup` returns `{ advisories, failed }`; OSV retries each call once, and a
+    failed batch or detail fetch fails only the packages it affects. A scan with some lookups failed completes
+    as `partial`; if all fail, the attempt is treated as transient.
+  - `retrying` with a reason; the last attempt ends `failed`.
+  - The `JobQueue` port and the pg-boss job-state adapter; `failIfOpen` with an attempt bump.
+  - A dead-letter handler and a sweeper in the worker.
+  - Queue wiring shared by the worker and the tests (`worker/scan-worker.ts`).
+  - Failure tests through real pg-boss: transient retry, retries exhausted, a worker stopped mid-scan, a crash
+    with no heartbeat, a crash on the last attempt, and the sweeper with a backlog and a zombie worker.
+- **Decisions agreed before coding:**
+  - Every lookup failing → retry, then `failed`.
+  - Some lookups failing → report as partial right away.
+  - The sweeper runs inside the worker every 60 s.
+- **Found along the way:**
+  - pg-boss `stop()` fails in-flight jobs ("pg-boss shut down while active") and aborts them, so a stopped
+    worker's scan is retried at once; only a real crash waits for the heartbeat (10 s minimum).
+  - The pipeline writes nothing on abort, so the retry claims a clean row.
+  - `retryDelayMax` can't be combined with `retryBackoff: false`, so the tests keep backoff on with a 0 delay.
+- **Verified by:** 290 tests green (typecheck, lint); the failure suite passed 3 out of 3 runs, about 33 s each;
+  each lifecycle outcome is mapped to its test in ARCHITECTURE.md.

@@ -60,6 +60,23 @@ Store `package` and `candidate_version` on findings so grouping into actions is 
 Other outcomes: `unsupported` (no supported lockfile, reason stored), `failed` (unrecoverable or
 retries exhausted). `retrying` while a transient error is being retried.
 Terminal: `completed`, `unsupported`, `failed`.
+**Every outcome and where it is tested (M4 gate):**
+
+| Outcome | How it is reached | Test |
+|---|---|---|
+| `queued` | submission: scan row + job in one transaction | `integration/submission`, `integration/api` |
+| `running` (fetching → scanning → analyzing) | claim, then stage writes | `integration/pipeline`, `integration/failures` (mid-scan) |
+| `completed`, coverage `full` | all supported deps checked | `integration/end-to-end`, `integration/pipeline` |
+| `completed`, coverage `partial` | some advisory lookups failed | `integration/pipeline`, `contract/osv`, `contract/vuln-database.contract` |
+| `completed`, nothing checkable | all deps from unsupported sources | `integration/pipeline` |
+| `unsupported` | no lockfile, lockfile v1, invalid JSON, empty repo, too large | `integration/pipeline`, `contract/github` |
+| `retrying` | transient error (or bug) on a non-final attempt | `integration/pipeline`, `integration/failures` |
+| `failed`: not found / private / bad token | permanent error, not retried | `integration/pipeline`, `integration/end-to-end` |
+| `failed`: retries exhausted | transient error on the last attempt (incl. every lookup failing) | `integration/pipeline`, `integration/failures` |
+| `failed`: last attempt crashed | dead-letter handler | `integration/failures` |
+| `failed`: job finished or missing | sweeper | `integration/failures` |
+| stale attempt / duplicate job / zombie | attempt guard, `failIfOpen` bumps attempt | `integration/scan-repository`, `integration/pipeline`, `integration/failures` |
+
 Progress is persisted on the scan row; the UI polls `GET /scans/:id`. Stage labels use real counts
 ("checked 80 of 142").
 
@@ -101,8 +118,10 @@ COMMIT;
 ```
 
 ### Failures
-- Transient (timeouts, 5xx, rate limits): the worker writes `status = 'retrying'` + `error_message`
-  (attempt-guarded), then throws so pg-boss retries with backoff. The next claim sets `running` again.
+- Transient (timeouts, 5xx, rate limits, and unexpected errors with a generic message): the worker writes
+  `status = 'retrying'` + reason (attempt-guarded), then throws so pg-boss retries with backoff. The next claim
+  sets `running` again. On the last attempt (`retryCount === retryLimit`) it writes `failed`
+  ("Retries exhausted: <reason>") instead. A job whose signal aborted (expired, stopped) writes nothing.
 - Unrecoverable (repo not found/private, other 403) and `unsupported`: mark the scan (attempt-guarded),
   then **return normally — do not throw**, or pg-boss will retry a permanent failure.
 - Some advisory lookups fail → `completed`, coverage `partial`, failed ones in `unchecked_deps`.
@@ -124,6 +143,9 @@ COMMIT;
   `deleteAfterSeconds` (finished, default 7 days) or `retentionSeconds` (never started, default 14 days).
   With dead-lettering covering crashes, the sweeper is defence in depth (DLQ handler down, job deleted). A job that is still queued, retrying or active is left alone, so queue
   backlog, backoff and worker downtime never fail a healthy scan.
+- Implemented in M4 (`application/lost-scans.ts`, wired in `worker/scan-worker.ts`): the sweeper runs in every
+  worker every 60 s (`SWEEP_INTERVAL_MS`) with staleness 600 s (`SWEEP_STALE_AFTER_SECONDS`: expiry 300 s +
+  backoff + margin); several workers sweeping at once is harmless (the update only matches open scans).
 - Dead-letter handler and sweeper both do
   `UPDATE scans SET status='failed', attempt = attempt + 1, ... WHERE id = $1 AND status NOT IN (terminal)`.
   Bumping `attempt` fences any zombie worker: its later writes match 0 rows and it stops.

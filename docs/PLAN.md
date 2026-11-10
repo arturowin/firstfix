@@ -47,8 +47,7 @@ Tests: URL normalization, idempotency (incl. 409), lockfile parser basics, one i
 - [x] Only lockfileVersion 2/3 supported; others → `unsupported` with reason
 - [x] Lockfile parsing rules from ARCHITECTURE.md (link, sources, dev/optional/devOptional, direct, dedupe, path aggregation)
 - [x] OSV chunking (≤1000), pagination, detail fetch deduped with a concurrency limit
-- [ ] Failed-lookup accounting → moved to M4 (today any failed lookup throws and the scan is retried;
-      `failedLookups` is always 0)
+- [x] Failed-lookup accounting (done in M4: partial coverage, `lookup_failed`, `failed_lookups`)
 - [x] Counts: checked, unsupported-source entries; zero-dependency lockfile handled; zero *checked* deps get
       "No dependencies could be checked", never a clean result (failed-lookup count: M4)
 - [x] Ranking policy as documented (malicious first, then severity, runtime/dev, direct/transitive)
@@ -85,16 +84,17 @@ Never cut a test while keeping the claim it proves. If a guarantee isn't tested,
 - [x] Provider seam (user request): `LlmClient` + registry; Anthropic is the first provider
 
 ## M4 · Failure behavior (all REQUIRED)
-- [ ] Some OSV lookups fail → completed, partial, unchecked listed
-- [ ] All lookups fail → failed with reason
-- [ ] Attempt guard on every write; findings + completion in one locked transaction; stale attempt or duplicate job changes nothing
-- [ ] Restart test: stop worker mid-scan, start again, scan completes
-- [ ] Transient error: worker writes `retrying` + reason, retried, scan recovers; UI shows retrying
-- [ ] Exhausted retries end in `failed` (final-attempt check and dead letter if available)
-- [ ] Sweeper: fails a scan only when its pg-boss job is finished or missing; leaves queued/retrying/active jobs alone (test with a backlog and a stopped worker); a zombie worker's later writes change nothing
-- [ ] Permanent failures (404, other 403, unsupported) are recorded and not retried
-- [ ] Restart test also covers a crash on the last attempt (scan ends `failed`, not stuck)
+- [x] Some OSV lookups fail → completed, partial, unchecked listed
+- [x] All lookups fail → failed with reason
+- [x] Attempt guard on every write; findings + completion in one locked transaction; stale attempt or duplicate job changes nothing
+- [x] Restart test: stop worker mid-scan, start again, scan completes
+- [x] Transient error: worker writes `retrying` + reason, retried, scan recovers; UI shows retrying
+- [x] Exhausted retries end in `failed` (final-attempt check and dead letter if available)
+- [x] Sweeper: fails a scan only when its pg-boss job is finished or missing; leaves queued/retrying/active jobs alone (test with a backlog and a stopped worker); a zombie worker's later writes change nothing
+- [x] Permanent failures (404, other 403, unsupported) are recorded and not retried
+- [x] Restart test also covers a crash on the last attempt (scan ends `failed`, not stuck)
 **Gate:** every outcome in ARCHITECTURE.md lifecycle is reachable and tested.
+      Status: passed; outcome → test map in ARCHITECTURE.md "Lifecycle".
 
 ## M5 · Polish and release
 - [ ] UI states: input, progress, retrying, completed, partial, clean, unsupported, failed

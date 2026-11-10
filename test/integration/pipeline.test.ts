@@ -183,6 +183,19 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
     });
   });
 
+  it('every lookup fails on the last attempt → failed, with the reason', async () => {
+    const id = await newScan();
+    const pipeline = new ScanPipeline({ scans, source: source(twoPackages), vulns: vulns(new Map(), undefined, ['a', 'b']) });
+    await expect(pipeline.run(id, signal(), { lastAttempt: true })).rejects.toBeInstanceOf(TransientError);
+    expect(await scans.get(id)).toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'advisory_lookup_failed',
+        message: 'Retries exhausted: Test advisories could not be reached: none of the 2 dependencies could be checked',
+      },
+    });
+  });
+
   it('zero dependencies → completed with nothing to check', async () => {
     const id = await newScan();
     const pipeline = new ScanPipeline({ scans, source: source(lockfile({})), vulns: vulns(new Map()) });
