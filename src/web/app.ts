@@ -506,9 +506,7 @@ function uncheckedList(report: ReportJson): HTMLElement {
 function promptSection(report: ReportJson): HTMLElement {
   const section = el('section', undefined, 'card');
   section.append(el('h2', 'Hand off to a coding agent'));
-  section.append(el('p', report.explanation?.source === 'ai'
-        ? 'Facts, candidate changes and instructions come from a fixed template; the AI-written explanations above are added as a marked context section. Read it before you paste it.'
-        : 'Built from the findings above by a fixed template, so it holds only scan data. Read it before you paste it.', 'muted'));
+  section.append(el('p', 'Built from the findings above by a fixed template, so it holds only scan data, whether or not AI explanations are on. Read it before you paste it.', 'muted'));
   const preview = el('details');
   preview.append(el('summary', 'Preview prompt'), el('pre', report.agentPrompt ?? ''));
   const copy = el('button', 'Copy prompt', 'primary');

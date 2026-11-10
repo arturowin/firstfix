@@ -205,8 +205,6 @@ describe('HTTP API', () => {
         ],
         agentPrompt: expect.stringContaining('npm install lodash@4.17.21') as string,
       });
-      // AI explanations were stored for this scan: the prompt carries them in the marked context section.
-      expect(body['agentPrompt']).toMatch(/## Context \(AI-written[^\n]*\nAI paragraph\.\n\n- lodash: AI why\./);
       // Scan JSON for polling stays small: no report data in it.
       expect(Object.keys((await app.inject({ url: `/scans/${scanId}` })).json<object>())).not.toContain('explanation');
     });

@@ -1,11 +1,9 @@
 /**
- * Coding-agent handoff prompt (docs/ARCHITECTURE.md "Coding-agent handoff prompt"). Facts, candidate changes and
- * instructions are built from a template, never by AI. When the scan's explanations were AI-written (and passed
- * the facts check), they are added as a marked context section that ranks below the facts.
+ * Coding-agent handoff prompt (docs/ARCHITECTURE.md "Coding-agent handoff prompt"). Built from a template, no AI.
+ * Facts (from the scan) are kept apart from candidate changes (to verify).
  */
 import type { RemediationHints } from './ecosystems/types.ts';
 import type { Action } from './fix-plan.ts';
-import { actionId } from './explanation.ts';
 import { describeAction } from './report-text.ts';
 
 export interface PromptInput {
@@ -16,32 +14,10 @@ export interface PromptInput {
   scannedAt: string;
   actions: readonly Action[];
   hintsFor: (ecosystem: string) => RemediationHints | null;
-  /**
-   * AI-written context, only when the scan's explanations came from the AI and passed the facts check:
-   * the summary paragraph and "why it matters" per action id. Added as a marked section; null → no section,
-   * and the prompt is fully template-built.
-   */
-  aiContext?: { summary: string; actions: Readonly<Record<string, string>> } | null;
 }
 
 /** Large plans are cut here; the prompt says how many were left out. */
 export const PROMPT_MAX_ACTIONS = 20;
-
-/** The AI context, marked as such and ranked below the facts. Empty without AI explanations. */
-function contextSection(input: PromptInput, shown: readonly Action[]): string[] {
-  const ctx = input.aiContext;
-  if (!ctx) return [];
-  const why = shown.flatMap((a) => {
-    const text = ctx.actions[actionId(a)];
-    return text ? [`- ${a.package}: ${text}`] : [];
-  });
-  return [
-    '',
-    '## Context (AI-written, checked against the scan data; where it differs from the facts below, the facts win)',
-    ctx.summary,
-    ...(why.length > 0 ? ['', ...why] : []),
-  ];
-}
 
 export function buildAgentPrompt(input: PromptInput): string | null {
   if (input.actions.length === 0) return null;
@@ -68,7 +44,6 @@ export function buildAgentPrompt(input: PromptInput): string | null {
     `You are working in ${input.repoUrl} at commit ${input.commitSha}.`,
     `A dependency scan of ${input.lockfilePath} (advisory data: ${input.advisorySource}, ${input.scannedAt}) found the issues below.`,
     'Candidate versions come from advisory data. They are not confirmed fixes: compatibility, resolution and tests are still to verify.',
-    ...contextSection(input, shown),
     '',
     '## Facts from the scan',
     ...facts,
