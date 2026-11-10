@@ -79,8 +79,9 @@ Never cut a test while keeping the claim it proves. If a guarantee isn't tested,
 - [x] AI text never overwrites structured facts
 - [x] `npm run eval`: small fixture set, checks IDs referenced exist, no invented versions, length limits
 **Gate:** report is complete when the LLM call fails, times out, returns garbage, or there is no key.
-      Status: gate covered by tests (fails, times out, garbage, refusal, injected title, no key) and a live
-      no-key run. Pending: a live run with a real Anthropic key (`npm run eval` + one demo scan).
+      Status: gate covered by tests (fails, times out, garbage, refusal, injected title, no key) and live runs
+      with and without a key (with the key, demo scans got AI explanations that passed the facts check).
+      Pending: `npm run eval` with the key (reads it from the shell, not `.env`).
 - [x] Provider seam (user request): `LlmClient` + registry; Anthropic is the first provider
 
 ## M4 · Failure behavior (all REQUIRED)
@@ -101,7 +102,29 @@ Never cut a test while keeping the claim it proves. If a guarantee isn't tested,
 - [x] Unit + integration + adapter contract tests complete
 - [x] README: Product interpretation → Assumptions → Quick start (Docker and non-Docker) → Demo repo → Architecture → Decisions → Failure behavior → Limits → Next steps → How I used coding agents (from AGENT_LOG)
 - [x] Demo fixture repo linked, with a warning not to `npm install` it; tested end to end; one real popular repo also tried
-- [x] README Limits: no rate limit on POST /scans, worker concurrency, idempotency key retention, GHSA-only severity,
-      npm only (ecosystem seams ready; lockfile ecosystems vs resolve-first ones), one lockfile per scan,
-      one advisory source (OSV; provider contract ready)
+- [x] README Limits: GHSA-only severity, npm only (ecosystem seams ready; lockfile ecosystems vs resolve-first
+      ones), one lockfile per scan, one advisory source (OSV; provider contract ready), per-process rate limit
+      and worker concurrency. (Rate limiting and key retention were limits here; both are now implemented,
+      see "After M5".)
 - [ ] Usability check: show the report to someone unfamiliar; ask what they'd do first and why, what was checked, what's uncertain. Fix confusion.
+
+## After M5 · Review hardening and demo readiness
+Found by external reviews after M5; each fix has a regression test (details in ARCHITECTURE.md and AGENT_LOG).
+- [x] Admission control: per-client limit on `POST /scans` (429), exact outstanding-scan cap (503), key
+      re-checked under the admission lock so concurrent replays get their scan
+- [x] Retention: finished scans and idempotency keys deleted on a schedule
+- [x] Lockfile input hardening: npm name/alias validation before any command; bounded, regex-free workspace
+      matching (budget charged before allocation); only clean, existing, declared workspace links skipped;
+      malformed strings stored safely, never dropped
+- [x] Bounded graph work and memory (path copies, deep chains), with `context_truncated` made explicit
+- [x] OSV correctness: events in version order, range-wide limits and `"*"`, explicit version lists kept,
+      partial pages and details keep confirmed findings (`incomplete`)
+- [x] Plan correctness: candidates checked against every advisory's ranges and lists; never an upgrade that
+      addresses zero advisories; what a partial fix leaves is named
+- [x] Agent prompt built only from validated fields (no titles or prose), also for older stored scans
+- [x] Browser: one idempotency key per intended scan; submit controls locked until the scan settles
+- [x] Compose: worker `restart: unless-stopped`, crash recovery verified in a disposable environment
+- [ ] Usability check (above): needs a person
+- [ ] `npm run eval` with an LLM key
+- [ ] Dependency audit: runtime dependencies clean; 10 moderate findings remain in the dev-only lint toolchain
+      (one minimatch advisory via eslint/typescript-eslint; npm's suggested fix is a breaking downgrade)

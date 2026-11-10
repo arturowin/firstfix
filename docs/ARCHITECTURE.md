@@ -25,34 +25,42 @@ Two processes share one PostgreSQL database.
 - **Adapters**: GitHub REST API, OSV.dev (the advisory source; see "Advisory source"), LLM (+ template fallback), Postgres, pg-boss.
 - Plain composition root per process; no DI framework. Contract tests show adapters are substitutable.
 
-## Data model (sketch — refine in M1)
+## Data model (current: migrations 001-010)
 ```
 scans(id uuid pk,            -- also the pg-boss job id (send({ id })), same submission tx
       repo_owner, repo_name, repo_url_normalized, commit_sha null,
-      lockfile_path null,         -- which lockfile was scanned, e.g. 'package-lock.json' (M2, migration 002)
+      lockfile_path null,         -- which lockfile was scanned, e.g. 'package-lock.json' (002)
       status, stage null, attempt int default 0,
       total_deps int, checked_deps int, unsupported_deps int, failed_lookups int,
       coverage null,              -- 'full' | 'partial'
+      advisory_source null,       -- e.g. 'OSV.dev', named in the report (003)
+      explanation jsonb null,     -- { source, summary, actions: { "<eco>:<pkg>": { text, source } }, fallbackReason? } (007)
       explanation_source null,    -- 'ai' | 'template'
       summary_line text null, error_code null, error_message null,
-      created_at, updated_at, completed_at null)
+      created_at, updated_at, completed_at null)   -- index on completed_at for retention (009)
 
 findings(id pk, scan_id fk,
-         ecosystem,                -- canonical ecosystem id (OSV's naming), 'npm' (M2, migration 002; in the unique key)
-         package, installed_version,
+         ecosystem,                -- canonical ecosystem id (OSV's naming), 'npm' (002; in the unique key)
+         package, installed_version,   -- package = the real name advisories use
+         installed_as text[],      -- every install name when an npm alias differs (005)
+         direct_as text[],         -- names the project declares it under directly; each needs updating (006)
          scope,                    -- 'runtime' | 'optional' | 'dev' (most exposed path)
          is_direct bool,           -- true if any install path is direct
          direct_parents text[],    -- all direct deps that pull it in (empty if direct)
-         install_paths jsonb,      -- e.g. [["express","body-parser","qs"]], capped
+         install_paths jsonb,      -- e.g. [["express","body-parser","qs"]], capped; deep ones abbreviated around "…"
+         context_truncated bool,   -- parents/paths were cut to bound work; the finding itself is complete (010)
          advisory_id, aliases text[], severity, is_malicious bool,
          title, affected_ranges jsonb,   -- neutral AffectedRange[] (see "Advisory source"), not provider JSON
-         candidate_version null, references jsonb,
-         explanation null)
+         candidate_version null, fix_status,   -- 'candidate' | 'no_fix' | 'unknown', kept consistent (004)
+         references jsonb)
 
-unchecked_deps(scan_id fk, ecosystem, package, version null, reason)   -- 'unsupported_source' | 'lookup_failed'
+unchecked_deps(scan_id fk, ecosystem, package, version null,
+               reason)   -- 'unsupported_source' | 'lookup_failed' | 'invalid_name' (008)
 
-idempotency_keys(key pk, request_hash, scan_id fk, created_at)
+idempotency_keys(key pk, request_hash, scan_id fk, created_at)   -- index on created_at for retention (009)
 ```
+Every string written to jsonb is made storable first (`src/domain/text.ts`): PostgreSQL rejects `\u0000` and
+unpaired surrogates, which would otherwise abort a report transaction.
 Store `package` and `candidate_version` on findings so grouping into actions is a query, not a migration.
 
 ## Lifecycle
@@ -86,6 +94,12 @@ Progress is persisted on the scan row; the UI polls `GET /scans/:id`. Stage labe
 - Same `Idempotency-Key` + same normalized request → same scan (200/202 with existing id).
 - Same key + different request → 409.
 - Rescan = new key = fresh lookup. Completed scans are never reused automatically.
+- Browser (`src/web/submission.ts`): one key per intended submission, reused when retrying after a network
+  error, a lost response, 429 or 503; cleared by a successful answer (the next deliberate scan gets a new key)
+  or a non-retryable 4xx. One shared guard for the button, Enter and "Scan again": locked while submitting and
+  while the page follows an unfinished scan (also after reloading its page); only the followed scan's terminal
+  state unlocks it, so a late answer about an older scan can't. A polling error keeps the lock and offers
+  "Check again", which never resubmits.
 - Normalize URL: lowercase owner/repo, strip `.git`, trailing slash; only `github.com`.
 
 ### Submission
@@ -93,6 +107,10 @@ Scan row + pg-boss job created in ONE transaction. Verified in M0 (pg-boss 12.38
 with `db.executeSql` bound to our transaction's client joins that transaction; rollback leaves no job.
 `send` returns `null` only when it dedupes (duplicate `id` or singleton options); treat `null` as an error
 and roll back, so a scan never exists without a job.
+Admission control in the same transaction: a transaction-scoped advisory lock serializes an exact count of
+outstanding scans against `MAX_OUTSTANDING_SCANS`; the Idempotency-Key is checked again under that lock, so a
+concurrent replay of the request that took the last slot gets its scan (or 409), never 503. The API also has a
+per-client limit on `POST /scans` (`SUBMIT_RATE_PER_MINUTE`, 429).
 
 ### Attempt ownership
 - Claim: increment `attempt`, skip if terminal (duplicate delivery is a no-op).
@@ -152,6 +170,14 @@ COMMIT;
 - Dead-letter handler and sweeper both do
   `UPDATE scans SET status='failed', attempt = attempt + 1, ... WHERE id = $1 AND status NOT IN (terminal)`.
   Bumping `attempt` fences any zombie worker: its later writes match 0 rows and it stops.
+
+### Worker restarts (Compose)
+The worker service has `restart: unless-stopped`. A worker that exits unexpectedly is brought back, and its
+unfinished job (kept in Postgres by pg-boss) is retried once the heartbeat lapses, with no new submission.
+Verified in a disposable Compose project: the worker process exited abruptly mid-scan (code 1, no shutdown
+handling); Docker restarted it and the same scan id completed ~71 s later (attempt 2, job retry_count 1), one
+scan and one job in the database. `docker kill` is not a crash for this purpose: Docker treats it as a manual
+stop and `unless-stopped` leaves the container down; `docker compose stop` stops it as intended.
 
 ### Queue settings (pg-boss 12, verified in M0 — see `test/contract/pgboss.test.ts`)
 Everything below is tested there unless marked as read from the source or as a proposal.
@@ -232,8 +258,15 @@ attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
   after the last `node_modules/` (e.g. `node_modules/a/node_modules/@s/b` → `@s/b`). The root `""` entry is the
   project itself, and other keys (e.g. `packages/internal-utils`) are workspace folders: neither is checked or
   counted. Their dependencies already appear as `node_modules/...` keys.
-- Entries with `link: true` (workspace packages, local code) are skipped entirely: not counted as checked
-  or unchecked. Their own dependencies are already in the root lockfile.
+- `link: true` entries are skipped as project code only when the target is a clean repo-relative path (no
+  leading `/`, `./`, `..`, empty segments, backslashes or drive letters), exists in the lockfile, and matches a
+  root `workspaces` glob (array or `{ packages }`). Every other link (e.g. `file:../local`, absolute paths,
+  missing targets) is an unchecked dependency (`unsupported_source`), never hidden.
+- Workspace globs come from an untrusted file, so matching uses no regexes (`workspaces.ts`): `*` within a
+  segment, a whole `**` segment for zero or more segments. One 1,000,000-step budget per lockfile covers all
+  patterns and locations; a match's full cost is charged before anything is allocated and only two rows of
+  working memory are kept; results are cached per location. Out of budget means "not a workspace", so the link
+  is reported, not hidden.
 - `resolved` starting with `file:`, `git+`, or a tarball URL that isn't the npm registry → `unchecked_deps`,
   reason `unsupported_source`.
 - Scope: `dev: true` or `devOptional: true` → dev; `optional: true` → optional (runtime); neither → runtime.
@@ -246,14 +279,18 @@ attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
   every direct parent and the shortest path from each; paths are capped at 5 per package version.
   Bounded while walking (review finding): predecessor pointers instead of path copies, at most 5 paths built
   per location, and a 5,000,000-step budget past which parents/paths are left empty (never partly filled);
-  a 42 KB worst-case lockfile went from ~185 MiB / 1.2 s to ~24 MiB / 0.1 s. Only links into declared
-  `workspaces` are project code; other `link: true` entries (e.g. `file:../local`) are unchecked dependencies.
+  a 42 KB worst-case lockfile went from ~185 MiB / 1.2 s to ~24 MiB / 0.1 s. Paths are built from at most 12
+  predecessor pointers (deeper ones keep the root, "…" and the last 10), so deep chains stay bounded too
+  (a 3,999-edge chain: ~8,000,000 path entries / ~273 MiB → ~48,000 / ~12 MiB). Whenever context is cut,
+  `context_truncated` is set and the report says so; findings are always kept.
 - Dedupe by `name@version` before the advisory lookup.
 - Tolerate entries without `resolved`/`integrity`.
 - Package names and aliases must be valid npm names (`src/domain/ecosystems/npm/name.ts`): they come from a
   repository-controlled file and end up in suggested commands. Invalid ones are set aside as `invalid_name`
   (migration 008): not looked up, not a parent, not in paths, no command. Command builders validate names and
   versions again and return no command rather than an unvalidated one (review finding).
+- Names or versions with control characters or invalid Unicode are also `invalid_name`, shown in a storable,
+  visible form (control characters as the text `\uXXXX`, unpaired surrogates as U+FFFD); nothing is dropped.
 - Finding granularity: one finding per `package@version` × advisory. Install paths are aggregated onto it
   (list of direct parents, `is_direct` true if any path is direct, scope = most exposed path).
 
@@ -313,12 +350,18 @@ OSV.dev is the only advisory source implemented. It sits behind the `VulnDatabas
     one malicious action. The adapter sets `isMalicious` for `MAL-` ids and for advisories whose
     `database_specific.cwe_ids` contains `CWE-506` (Embedded Malicious Code), which is how the recorded GitHub
     malware advisories are tagged. Never from title text.
-  - The adapter turns events into `AffectedRange`s in order: each `introduced` opens a range, the next `fixed`
-    / `last_affected` closes it, one left open affects all later versions; `limit` closes without a fix; GIT
-    ranges are skipped. Severity labels are translated in the adapter (`src/adapters/osv/translate.ts`).
+  - The adapter first sorts a range's events with the ecosystem's version ordering ("0" lowest, ties
+    stable; unorderable → listed order kept), then each `introduced` opens an interval and the next `fixed` /
+    `last_affected` closes it; one left open affects all later versions. `limit` events apply to every
+    interval of their range (affected only below some limit; `"*"` = unlimited) and are never a fix. Explicit
+    `versions` lists are kept next to ranges (affected if in either). GIT ranges are skipped. Severity labels
+    are translated in the adapter (`src/adapters/osv/translate.ts`).
   - Unknown id → HTTP 404.
-- A package is reported as not checked if its batch query failed, or any of its advisory details couldn't
-  be fetched. These feed `failed_lookups` and `unchecked_deps` (`lookup_failed`).
+- Records and batch entries are validated inside the retry/failure boundary. A package whose first batch page
+  failed is `failed` (no evidence). A package with some evidence but not all of it (a detail fetch failed or was
+  malformed, or a later results page failed) is `incomplete`: its confirmed advisories are kept as findings and
+  it still counts as not fully checked. Both feed `failed_lookups`, `unchecked_deps` (`lookup_failed`) and
+  `coverage: partial`.
 - Severity: GHSA label from `database_specific.severity` when present; otherwise `unknown` (labelled).
   No CVSS parsing in this version (stated as next step).
 
@@ -353,6 +396,11 @@ Fix information shapes the action, not the rank.
   crosses a major version while a lower candidate would fix some advisories, show both ("4.x fixes 2 of 3;
   5.x needed for the third") and flag the major jump. Advisories with no fix are listed in the action
   as unresolved by any upgrade.
+- The final candidate is checked against every advisory with stored ranges: if it addresses none, the plan
+  falls back to the option addressing most (lowest version on a tie); if none addresses anything, no upgrade
+  is recommended (`noUsefulCandidate`, action kind `review`, no command). Each candidate lists what it still
+  leaves (`stillAffected`), in the report and in the agent prompt. Rows without stored ranges keep their
+  candidate ("can't verify" isn't "none").
 - Malicious entries usually have no ranges or fix: separate path, action "remove the package,
   check how it got in, rotate secrets that were available where it was installed".
 
@@ -411,9 +459,10 @@ wasn't checked, advisories change over time → rescan, suggest the ecosystem's 
 Never says "secure". Partial clean is never shown as clean overall.
 
 ## API (sketch)
-- `POST /scans` `{ repoUrl }` + `Idempotency-Key` → `202 { scanId }` | 400 | 409
+- `POST /scans` `{ repoUrl }` + `Idempotency-Key` → `202 { scanId }` | 200 (key replay) | 400 | 409 |
+  429 (per-client limit) | 503 (outstanding-scan cap), both with `Retry-After`
 - `GET /scans/:id` → status, stage, counts, coverage, error
-- `GET /scans/:id/report` → summary, actions, findings, unchecked, agentPrompt, explanationSource
+- `GET /scans/:id/report` → scan, summary, explanation, ciChecks, actions, findings, unchecked, agentPrompt
 - `GET /` → UI; `/scans/:id` route in UI is shareable
 - `GET /health/live`, `GET /health/ready`
 
