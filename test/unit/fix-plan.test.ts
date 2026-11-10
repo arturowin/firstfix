@@ -218,6 +218,14 @@ describe('summary line', () => {
     expect(empty).toBe('No dependencies to check in package-lock.json.');
     expect(`${clean} ${empty}`).not.toMatch(/secure|safe/i);
   });
+
+  it('nothing checked is not reported as "no known vulnerabilities"', () => {
+    const none = summaryLine({ counts: { totalDeps: 3, checkedDeps: 0 }, lockfilePath: 'package-lock.json', actions: [] });
+    expect(none).toBe(
+      "No dependencies could be checked: all 3 come from sources advisory data doesn't cover (git, local files or other URLs).",
+    );
+    expect(none).not.toMatch(/no known vulnerabilities/i);
+  });
 });
 
 describe('coding-agent prompt', () => {

@@ -111,7 +111,8 @@ async function api(path: string, init?: RequestInit): Promise<{ status: number; 
   const headers = new Headers(init?.headers);
   headers.set('accept', 'application/json');
   const res = await fetch(path, { ...init, headers });
-  return { status: res.status, body: await res.json() };
+  // An error page from a proxy may not be JSON; the status still tells the caller what happened.
+  return { status: res.status, body: await res.json().catch(() => null) };
 }
 
 // One key per intended submission: a double click or a retried request reuses it.
@@ -132,7 +133,7 @@ async function submit(repoUrl: string, fresh = false): Promise<void> {
       headers: { 'content-type': 'application/json', 'idempotency-key': pending.key },
       body: JSON.stringify({ repoUrl }),
     });
-    const body = res.body as { scanId?: string; error?: { message: string } };
+    const body = (res.body ?? {}) as { scanId?: string; error?: { message: string } };
     if ((res.status === 202 || res.status === 200) && body.scanId) {
       pending = null;
       history.pushState(null, '', `/scans/${body.scanId}`);
@@ -156,9 +157,15 @@ async function follow(scanId: string): Promise<void> {
     let scan: ScanJson;
     try {
       const res = await api(`/scans/${scanId}`);
+      if (following !== scanId) return;
       if (res.status === 404) {
         renderMessage('Scan not found.');
         return;
+      }
+      if (res.status !== 200) {
+        renderMessage(`The server answered ${String(res.status)} while checking progress; retrying…`);
+        await sleep(3000);
+        continue;
       }
       scan = res.body as ScanJson;
     } catch {
@@ -169,8 +176,7 @@ async function follow(scanId: string): Promise<void> {
     if (TERMINAL.has(scan.status)) {
       if (input.value === '') input.value = scan.repo.url;
       if (scan.status === 'completed') {
-        const { body } = await api(`/scans/${scanId}/report`);
-        renderReport(body as ReportJson);
+        await showReport(scanId);
       } else {
         renderOutcome(scan);
       }
@@ -178,6 +184,34 @@ async function follow(scanId: string): Promise<void> {
     }
     renderProgress(scan);
     await sleep(1500);
+  }
+}
+
+/**
+ * The scan has finished; fetch its report until it arrives. A lost connection or an error answer shows a
+ * recovery message and retries, and nothing is rendered once the user has moved on to another scan.
+ */
+async function showReport(scanId: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    if (following !== scanId) return;
+    let problem: string;
+    try {
+      const res = await api(`/scans/${scanId}/report`);
+      if (following !== scanId) return;
+      if (res.status === 200) {
+        renderReport(res.body as ReportJson);
+        return;
+      }
+      if (res.status === 404) {
+        renderMessage('Scan not found.');
+        return;
+      }
+      problem = `the server answered ${String(res.status)}`;
+    } catch {
+      problem = 'the connection was lost';
+    }
+    renderMessage(`The scan finished, but loading its report failed (${problem}). Retrying…`);
+    await sleep(Math.min(1500 * attempt, 10_000));
   }
 }
 
@@ -405,6 +439,17 @@ function cleanCard(report: ReportJson): HTMLElement {
   box.append(repoTitle(scan));
   if (c.totalDeps === 0) {
     box.append(el('p', report.summary ?? 'No dependencies to check.', 'summary'));
+  } else if (c.checkedDeps === 0) {
+    // Nothing was assessed: not a clean result.
+    box.append(el('p', 'No dependencies could be checked', 'summary'));
+    box.append(
+      el('p', 'Every dependency in the lockfile comes from a source advisory data does not cover (git, local files or other URLs), so no security assessment was possible. They are listed below.'),
+    );
+    if (report.unchecked.length > 0) box.append(uncheckedList(report));
+    const row = el('div', undefined, 'row');
+    row.append(scanAgainButton(scan));
+    box.append(row);
+    return box;
   } else {
     const at = scan.commitSha ? ` at commit ${scan.commitSha.slice(0, 7)}` : '';
     const partial = scan.coverage === 'partial' ? ' (partial: some dependencies could not be checked, see below)' : '';

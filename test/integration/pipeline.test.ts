@@ -122,6 +122,17 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
     expect((await scans.getReport(id))?.findings).toMatchObject([{ package: 'lodash', installedAs: ['my-lodash'], isDirect: true }]);
   });
 
+  it('every dependency unsupported → completed, but the summary says nothing could be checked', async () => {
+    const id = await newScan();
+    const onlyGit = lockfile({ 'node_modules/g': { version: '1.0.0', resolved: 'git+ssh://git@github.com/o/g.git#abc' } });
+    const pipeline = new ScanPipeline({ scans, source: source(onlyGit), vulns: vulns(new Map()) });
+    expect(await pipeline.run(id, signal())).toBe('completed');
+    expect(await scans.get(id)).toMatchObject({
+      counts: { totalDeps: 1, checkedDeps: 0, unsupportedDeps: 1 },
+      summaryLine: expect.stringMatching(/^No dependencies could be checked/) as string,
+    });
+  });
+
   it('zero dependencies → completed with nothing to check', async () => {
     const id = await newScan();
     const pipeline = new ScanPipeline({ scans, source: source(lockfile({})), vulns: vulns(new Map()) });

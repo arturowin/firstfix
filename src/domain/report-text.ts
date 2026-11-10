@@ -30,6 +30,10 @@ export interface SummaryInput {
 /** One line at the top of the report: what was found, in how much was checked, and what to start with. */
 export function summaryLine({ counts, lockfilePath, actions }: SummaryInput): string {
   if (counts.totalDeps === 0) return `No dependencies to check in ${lockfilePath ?? 'the lockfile'}.`;
+  // Nothing assessed is not a clean result: say so first (review finding, M2).
+  if (counts.checkedDeps === 0) {
+    return `No dependencies could be checked: ${counts.totalDeps === 1 ? 'the only one comes' : `all ${String(counts.totalDeps)} come`} from sources advisory data doesn't cover (git, local files or other URLs).`;
+  }
   const checked = `${String(counts.checkedDeps)} of ${plural(counts.totalDeps, 'dependency', 'dependencies')} checked`;
   if (actions.length === 0) return `No known vulnerabilities in ${checked}.`;
 
