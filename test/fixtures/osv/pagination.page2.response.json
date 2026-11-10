@@ -1,0 +1,22 @@
+{
+  "_note": "trimmed: real response had 1000 vulns; kept first 3",
+  "results": [
+    {
+      "vulns": [
+        {
+          "id": "DEBIAN-CVE-2018-6554",
+          "modified": "2026-10-23T18:03:07.941131Z"
+        },
+        {
+          "id": "DEBIAN-CVE-2018-6555",
+          "modified": "2026-10-23T18:03:23.177104Z"
+        },
+        {
+          "id": "DEBIAN-CVE-2018-6927",
+          "modified": "2026-10-23T18:03:48.185522Z"
+        }
+      ],
+      "next_page_token": "P:ClQKIgoHdnVsbl9pZBIXGhVERUJJQU4tQ1ZFLTIwMjEtNDcyMjYSKmoJbX5vc3MtdmRich0LEhBBZmZlY3RlZFZlcnNpb25zGICAgMyY4JIIDBgAIAA:REVCSUFOLUNWRS0yMDIxLTQ3MjI2"
+    }
+  ]
+}

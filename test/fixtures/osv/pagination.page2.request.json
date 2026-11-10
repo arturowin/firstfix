@@ -1,0 +1,11 @@
+{
+  "queries": [
+    {
+      "package": {
+        "ecosystem": "Debian:12",
+        "name": "linux"
+      },
+      "page_token": "P:ClMKIQoHdnVsbl9pZBIWGhRERUJJQU4tQ1ZFLTIwMTgtNjQxMhIqagltfm9zcy12ZGJyHQsSEEFmZmVjdGVkVmVyc2lvbnMYgICAtPuJlAkMGAAgAA:REVCSUFOLUNWRS0yMDE4LTY0MTI="
+    }
+  ]
+}

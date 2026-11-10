@@ -1,0 +1,17 @@
+{
+  "queries": [
+    {
+      "package": {
+        "ecosystem": "Debian:12",
+        "name": "linux"
+      }
+    },
+    {
+      "package": {
+        "ecosystem": "npm",
+        "name": "lodash"
+      },
+      "version": "4.17.20"
+    }
+  ]
+}

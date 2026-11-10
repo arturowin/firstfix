@@ -1,0 +1,42 @@
+{
+  "_note": "trimmed: real response had 1000 vulns in results[0]; kept first 3",
+  "results": [
+    {
+      "vulns": [
+        {
+          "id": "DEBIAN-CVE-2004-0230",
+          "modified": "2026-10-10T00:00:03.244825Z"
+        },
+        {
+          "id": "DEBIAN-CVE-2005-3660",
+          "modified": "2026-10-23T03:47:29.742362Z"
+        },
+        {
+          "id": "DEBIAN-CVE-2007-3719",
+          "modified": "2026-10-21T17:47:31.699225Z"
+        }
+      ],
+      "next_page_token": "P:ClMKIQoHdnVsbl9pZBIWGhRERUJJQU4tQ1ZFLTIwMTgtNjQxMhIqagltfm9zcy12ZGJyHQsSEEFmZmVjdGVkVmVyc2lvbnMYgICAtPuJlAkMGAAgAA:REVCSUFOLUNWRS0yMDE4LTY0MTI="
+    },
+    {
+      "vulns": [
+        {
+          "id": "GHSA-29mw-wpgm-hmr9",
+          "modified": "2025-09-29T21:12:31.102523Z"
+        },
+        {
+          "id": "GHSA-35jh-r3h4-6jhm",
+          "modified": "2026-10-17T02:55:38.085813Z"
+        },
+        {
+          "id": "GHSA-r5fr-rjxr-66jc",
+          "modified": "2026-10-17T02:56:15.633068Z"
+        },
+        {
+          "id": "GHSA-xxjr-mmjv-4gpg",
+          "modified": "2026-11-04T03:15:10.832238Z"
+        }
+      ]
+    }
+  ]
+}

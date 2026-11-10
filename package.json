@@ -1,0 +1,34 @@
+{
+  "name": "ai-scan-review",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "preapi": "node scripts/check-node.mjs",
+    "api": "node src/api/main.ts",
+    "preworker": "node scripts/check-node.mjs",
+    "worker": "node src/worker/main.ts",
+    "premigrate": "node scripts/check-node.mjs",
+    "migrate": "node scripts/migrate.ts",
+    "pretest": "node scripts/check-node.mjs",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "pg": "8.23.1",
+    "pg-boss": "12.38.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "22.20.5",
+    "@types/pg": "8.23.1",
+    "eslint": "10.14.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.2",
+    "vitest": "5.1.0"
+  }
+}
