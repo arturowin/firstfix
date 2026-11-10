@@ -213,3 +213,18 @@ One entry per milestone (or per notable session). Keep it factual.
   - `retryDelayMax` can't be combined with `retryBackoff: false`, so the tests keep backoff on with a 0 delay.
 - **Verified by:** 290 tests green (typecheck, lint); the failure suite passed 3 out of 3 runs, about 33 s each;
   each lifecycle outcome is mapped to its test in ARCHITECTURE.md.
+
+### 2026-11-10 · M4 review fixes
+- **Review found (all confirmed):**
+  - P2: the sweeper always inspected the same oldest 100 stale scans, so a lost scan behind a queued backlog
+    was never reached.
+  - P2: a malformed `200` OSV record threw during translation and rejected the whole lookup.
+  - P2: the report listed failed lookups under "non-registry source".
+- **Agent did:**
+  - Keyset-paginated sweeps (at most 500 per sweep, pages of 100) that resume from an in-memory cursor and
+    wrap at the end. It doesn't touch `updated_at`.
+  - OSV record and batch-entry validation inside the retry/failure boundary, plus per-package isolation of
+    translation. A test confirms every recorded real record still validates.
+  - The UI groups unchecked dependencies by reason, each with its own advice; failed lookups say to scan again.
+- **Verified by:** the full suite green (typecheck, lint), including the review's backlog reproduction through
+  real pg-boss, and malformed-record and batch-entry tests. UI change not browser-checked.

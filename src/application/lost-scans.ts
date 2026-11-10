@@ -9,7 +9,7 @@
  * Both use failIfOpen, which bumps `attempt`: a zombie worker's later writes match nothing.
  */
 import type { JobQueue } from '../ports/job-queue.ts';
-import type { ScanRepository } from '../ports/scan-repository.ts';
+import type { ScanRepository, StaleCursor } from '../ports/scan-repository.ts';
 
 export const DEAD_LETTER_REASON = {
   code: 'retries_exhausted',
@@ -31,27 +31,55 @@ export interface SweepResult {
   failed: string[];
 }
 
+/**
+ * Each sweep checks at most `maxChecksPerSweep` scans, in pages of `pageSize`, resuming where the previous sweep
+ * stopped and starting over once it reaches the end. So stale scans whose jobs are healthy (a queued backlog)
+ * can't hide a lost one behind them: every stale scan is checked within a few sweeps. The cursor lives in
+ * memory; each worker keeps its own, which only means some scans are checked more often.
+ */
 export class Sweeper {
   private readonly scans: ScanRepository;
   private readonly jobs: JobQueue;
   private readonly staleAfterSeconds: number;
-  private readonly batchSize: number;
+  private readonly pageSize: number;
+  private readonly maxChecksPerSweep: number;
+  private cursor: StaleCursor | null = null;
 
-  constructor(deps: { scans: ScanRepository; jobs: JobQueue; staleAfterSeconds: number; batchSize?: number }) {
+  constructor(deps: {
+    scans: ScanRepository;
+    jobs: JobQueue;
+    staleAfterSeconds: number;
+    pageSize?: number;
+    maxChecksPerSweep?: number;
+  }) {
     this.scans = deps.scans;
     this.jobs = deps.jobs;
     this.staleAfterSeconds = deps.staleAfterSeconds;
-    this.batchSize = deps.batchSize ?? 100;
+    this.pageSize = deps.pageSize ?? 100;
+    this.maxChecksPerSweep = deps.maxChecksPerSweep ?? 500;
   }
 
   async sweepOnce(): Promise<SweepResult> {
-    const ids = await this.scans.findStale(this.staleAfterSeconds, this.batchSize);
     const failed: string[] = [];
-    for (const id of ids) {
-      const state = await this.jobs.scanJobState(id);
-      if (state !== 'finished' && state !== 'missing') continue;
-      if (await this.scans.failIfOpen(id, LOST_JOB_REASON)) failed.push(id);
+    let checked = 0;
+    while (checked < this.maxChecksPerSweep) {
+      const page = await this.scans.findStale(
+        this.staleAfterSeconds,
+        Math.min(this.pageSize, this.maxChecksPerSweep - checked),
+        this.cursor,
+      );
+      if (page.length === 0) {
+        this.cursor = null; // reached the end: the next sweep starts from the oldest again
+        break;
+      }
+      for (const scan of page) {
+        checked++;
+        this.cursor = scan;
+        const state = await this.jobs.scanJobState(scan.id);
+        if (state !== 'finished' && state !== 'missing') continue;
+        if (await this.scans.failIfOpen(scan.id, LOST_JOB_REASON)) failed.push(scan.id);
+      }
     }
-    return { checked: ids.length, failed };
+    return { checked, failed };
   }
 }

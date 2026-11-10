@@ -1,7 +1,7 @@
 import { TransientError } from '../../ports/errors.ts';
 import { packageKey, type LookupResult, type PackageRef, type VulnDatabase } from '../../ports/vuln-database.ts';
 import { fetchWithTimeout, USER_AGENT } from '../http.ts';
-import { toAdvisory, type OsvVuln } from './translate.ts';
+import { isOsvVuln, toAdvisory, type OsvVuln } from './translate.ts';
 
 export interface OsvOptions {
   baseUrl?: string;
@@ -65,10 +65,15 @@ export class OsvVulnDatabase implements VulnDatabase {
         continue;
       }
       if (ids.length === 0) continue;
-      result.advisories.set(
-        key,
-        ids.map((id) => toAdvisory(details.get(id) ?? { id }, pkg)),
-      );
+      try {
+        result.advisories.set(
+          key,
+          ids.map((id) => toAdvisory(details.get(id) ?? { id }, pkg)),
+        );
+      } catch {
+        // Validated records shouldn't fail to translate; if one does, only this package is affected.
+        result.failed.push(pkg);
+      }
     }
     return result;
   }
@@ -112,6 +117,11 @@ export class OsvVulnDatabase implements VulnDatabase {
           const entry = chunk[j];
           if (!entry) return;
           const key = packageKey(entry.pkg);
+          // A malformed entry fails its own package only; positions still line up for the rest.
+          if (!isBatchResult(r)) {
+            failed.add(key);
+            return;
+          }
           const list = ids.get(key) ?? [];
           for (const v of r.vulns ?? []) if (!list.includes(v.id)) list.push(v.id);
           ids.set(key, list);
@@ -135,9 +145,12 @@ export class OsvVulnDatabase implements VulnDatabase {
     }
   }
 
+  /** Validated inside the retry boundary: a malformed record counts as a failed fetch for that advisory. */
   private async fetchVuln(id: string, signal: AbortSignal): Promise<OsvVuln> {
     const res = await this.request(`/v1/vulns/${encodeURIComponent(id)}`, { method: 'GET' }, signal);
-    return (await res.json()) as OsvVuln;
+    const body: unknown = await res.json();
+    if (!isOsvVuln(body, id)) throw new TransientError('osv_bad_response', `OSV returned a malformed record for ${id}`);
+    return body;
   }
 
   private post(path: string, body: unknown, signal: AbortSignal): Promise<Response> {
@@ -162,6 +175,16 @@ export class OsvVulnDatabase implements VulnDatabase {
     }
     return res;
   }
+}
+
+function isBatchResult(r: unknown): r is BatchResult {
+  if (typeof r !== 'object' || r === null || Array.isArray(r)) return false;
+  const { vulns, next_page_token: token } = r as Record<string, unknown>;
+  if (token !== undefined && typeof token !== 'string') return false;
+  return (
+    vulns === undefined ||
+    (Array.isArray(vulns) && vulns.every((v) => typeof v === 'object' && v !== null && typeof (v as { id?: unknown }).id === 'string'))
+  );
 }
 
 async function mapWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {

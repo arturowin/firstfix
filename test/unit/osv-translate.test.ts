@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { isMalicious, severityFromLabel, toAdvisory, toRanges, type OsvVuln } from '../../src/adapters/osv/translate.ts';
+import { isMalicious, isOsvVuln, severityFromLabel, toAdvisory, toRanges, type OsvVuln } from '../../src/adapters/osv/translate.ts';
+import { readdirSync } from 'node:fs';
 
 const fixture = (id: string): OsvVuln =>
   JSON.parse(readFileSync(path.join(import.meta.dirname, '..', 'fixtures', 'osv', `${id}.json`), 'utf8')) as OsvVuln;
@@ -79,5 +80,14 @@ describe('toAdvisory (recorded fixtures)', () => {
       isMalicious: true,
       affectedRanges: [{ kind: 'versions', versions: ['0.1.1'] }],
     });
+  });
+});
+
+describe('isOsvVuln', () => {
+  it('accepts every recorded real OSV record', () => {
+    const dir = path.join(import.meta.dirname, '..', 'fixtures', 'osv');
+    const records = readdirSync(dir).filter((f) => /^(GHSA|MAL)-.*\.json$/.test(f));
+    expect(records.length).toBeGreaterThan(4);
+    for (const f of records) expect(isOsvVuln(fixture(f.replace(/\.json$/, '')), f.replace(/\.json$/, ''))).toBe(true);
   });
 });

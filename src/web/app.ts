@@ -289,10 +289,14 @@ function summaryCard(report: ReportJson): HTMLElement {
     if (item) meta.append(el('li', item));
   }
   box.append(meta);
-  if (c.unsupportedDeps > 0) {
-    box.append(
-      el('p', `Not checked (non-registry source): ${report.unchecked.map((u) => u.package).join(', ')}.`, 'muted'),
-    );
+  // Two different reasons, two different remedies: keep them apart.
+  const unsupported = report.unchecked.filter((u) => u.reason === 'unsupported_source');
+  const lookupFailed = report.unchecked.filter((u) => u.reason === 'lookup_failed');
+  if (unsupported.length > 0) {
+    box.append(el('p', `Not checked, non-registry source: ${names(unsupported)}.`, 'muted'));
+  }
+  if (lookupFailed.length > 0) {
+    box.append(el('p', `Not checked, advisory lookup failed (temporary): ${names(lookupFailed)}. Scan again to check them.`, 'muted'));
   }
   return box;
 }
@@ -417,15 +421,38 @@ function findingsSection(report: ReportJson): HTMLElement {
   return section;
 }
 
+type Unchecked = ReportJson['unchecked'][number];
+
+function names(items: Unchecked[], max = 8): string {
+  const shown = items.slice(0, max).map((u) => u.package);
+  return items.length > max ? `${shown.join(', ')} and ${String(items.length - max)} more` : shown.join(', ');
+}
+
+const UNCHECKED_GROUPS: { reason: Unchecked['reason']; title: string; advice: string }[] = [
+  {
+    reason: 'lookup_failed',
+    title: 'Advisory lookup failed',
+    advice: 'Registry packages the advisory source could not be asked about this time. This is usually temporary: scan again to check them.',
+  },
+  {
+    reason: 'unsupported_source',
+    title: 'Non-registry source',
+    advice: 'Installed from git, a local file or another URL. Advisory data covers registry versions only, so these need a manual review.',
+  },
+];
+
+/** Unchecked dependencies, grouped by reason, each with what to do about it. */
 function uncheckedList(report: ReportJson): HTMLElement {
   const box = el('div');
   box.append(el('h3', `Not checked (${String(report.unchecked.length)})`));
-  const list = el('ul');
-  for (const u of report.unchecked) {
-    const why = u.reason === 'unsupported_source' ? 'installed from a non-registry source (git, file or other URL)' : 'advisory lookup failed';
-    list.append(el('li', `${u.package}${u.version ? ` ${u.version}` : ''}: ${why}`));
+  for (const g of UNCHECKED_GROUPS) {
+    const items = report.unchecked.filter((u) => u.reason === g.reason);
+    if (items.length === 0) continue;
+    box.append(el('h4', `${g.title} (${String(items.length)})`), el('p', g.advice, 'muted'));
+    const list = el('ul');
+    for (const u of items) list.append(el('li', `${u.package}${u.version ? ` ${u.version}` : ''}`));
+    box.append(list);
   }
-  box.append(list);
   return box;
 }
 

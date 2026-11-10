@@ -254,6 +254,40 @@ describe('OsvVulnDatabase', () => {
     expect([...r.advisories.keys()]).toEqual(['npm:c@1.0.0']);
   });
 
+  it.each([
+    ['affected is an object, not a list (review reproduction)', { id: 'BAD-1', affected: {} }],
+    ['ranges events are not a list', { id: 'BAD-1', affected: [{ package: { ecosystem: 'npm', name: 'a' }, ranges: [{ type: 'SEMVER', events: 'x' }] }] }],
+    ['a different id than requested', { id: 'OTHER-1', affected: [] }],
+    ['not an object', ['BAD-1']],
+  ])('a malformed advisory record (200 OK) — %s — fails only the packages citing it', async (_l, body) => {
+    let detailCalls = 0;
+    serveVulnFixtures(new Map());
+    server.use(
+      http.post(`${OSV}/v1/querybatch`, () =>
+        HttpResponse.json({ results: [{ vulns: [{ id: 'BAD-1' }] }, { vulns: [{ id: 'GHSA-29mw-wpgm-hmr9' }] }] }),
+      ),
+      http.get(`${OSV}/v1/vulns/BAD-1`, () => {
+        detailCalls++;
+        return HttpResponse.json(body);
+      }),
+    );
+    const r = await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([pkg('a'), pkg('lodash')], signal());
+    expect(r.failed).toEqual([pkg('a')]);
+    expect([...r.advisories.keys()]).toEqual(['npm:lodash@1.0.0']);
+    expect(detailCalls).toBe(2); // treated like a failed fetch: retried once
+  });
+
+  it.each([
+    ['vulns is not a list', { vulns: 'GHSA-x' }],
+    ['a vuln without a string id', { vulns: [{ id: 42 }] }],
+    ['the entry is null', null],
+    ['next_page_token is not a string', { vulns: [], next_page_token: 7 }],
+  ])('a malformed batch entry — %s — fails only its package', async (_l, entry) => {
+    server.use(http.post(`${OSV}/v1/querybatch`, () => HttpResponse.json({ results: [entry, {}] })));
+    const r = await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([pkg('a'), pkg('b')], signal());
+    expect(r).toEqual({ advisories: new Map(), failed: [pkg('a')] });
+  });
+
   it('no packages → no calls', async () => {
     expect(await new OsvVulnDatabase().lookup([], signal())).toEqual({ advisories: new Map(), failed: [] });
   });

@@ -24,6 +24,36 @@ export interface OsvVuln {
   affected?: OsvAffected[];
 }
 
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isStr = (v: unknown): v is string => typeof v === 'string';
+const optArrayOf = (v: unknown, item: (x: unknown) => boolean) => v === undefined || (Array.isArray(v) && v.every(item));
+const optStr = (v: unknown) => v === undefined || isStr(v);
+
+/**
+ * Is this a record we can translate? Checked inside the fetch's retry/failure boundary, so a malformed record
+ * fails only the packages citing it (like a failed fetch) instead of the whole lookup. Unknown extra fields
+ * are fine; wrong shapes for the fields we read are not.
+ */
+export function isOsvVuln(v: unknown, expectedId: string): v is OsvVuln {
+  if (!isObj(v) || v['id'] !== expectedId) return false;
+  if (!optStr(v['summary']) || !optArrayOf(v['aliases'], isStr)) return false;
+  if (!optArrayOf(v['references'], (r) => isObj(r) && optStr(r['type']) && optStr(r['url']))) return false;
+  if (v['database_specific'] !== undefined && !isObj(v['database_specific'])) return false;
+  return optArrayOf(v['affected'], (a) => {
+    if (!isObj(a)) return false;
+    const pkg = a['package'];
+    if (pkg !== undefined && !(isObj(pkg) && optStr(pkg['ecosystem']) && optStr(pkg['name']))) return false;
+    if (!optArrayOf(a['versions'], isStr)) return false;
+    return optArrayOf(a['ranges'], (r) => {
+      if (!isObj(r) || !optStr(r['type'])) return false;
+      return optArrayOf(r['events'], (e) => {
+        if (!isObj(e)) return false;
+        return optStr(e['introduced']) && optStr(e['fixed']) && optStr(e['last_affected']) && optStr(e['limit']);
+      });
+    });
+  });
+}
+
 /** CWE-506 "Embedded Malicious Code": how GitHub marks its malware advisories (e.g. GHSA-9x64-5r7x-2q53). */
 const MALICIOUS_CWE = 'CWE-506';
 

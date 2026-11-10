@@ -251,5 +251,28 @@ describe('failure behaviour through the real queue', () => {
       // A second sweep is a no-op.
       expect((await new Sweeper({ scans, jobs, staleAfterSeconds: 0 }).sweepOnce()).failed).toEqual([]);
     }, 30_000);
+
+    it('a backlog of healthy stale scans can’t hide a lost one: sweeps resume where they stopped', async () => {
+      // Review reproduction, scaled down: older pending jobs first, then a scan whose job is missing.
+      const backlog: string[] = [];
+      for (let i = 0; i < 7; i++) backlog.push(await submit());
+      const lost = randomUUID();
+      await env.pool.query(
+        `INSERT INTO scans (id, repo_owner, repo_name, repo_url_normalized) VALUES ($1, 'o', 'lost', 'https://github.com/o/lost')`,
+        [lost],
+      );
+      const sweeper = new Sweeper({ scans, jobs: new PgBossJobQueue(env.boss), staleAfterSeconds: 0, pageSize: 2, maxChecksPerSweep: 3 });
+
+      const sweeps: { checked: number; failed: string[] }[] = [];
+      while ((await statusOf(lost)) !== 'failed') {
+        if (sweeps.length === 10) throw new Error(`lost scan never checked: ${JSON.stringify(sweeps)}`);
+        sweeps.push(await sweeper.sweepOnce());
+      }
+      // Other open scans in this database (earlier tests) also count as stale; what matters is that each sweep
+      // checks at most 3 and they move forward instead of repeating the first page.
+      expect(sweeps.every((r) => r.checked <= 3)).toBe(true);
+      expect(sweeps.flatMap((r) => r.failed)).toContain(lost);
+      for (const id of backlog) expect(await statusOf(id)).toBe('queued');
+    }, 30_000);
   });
 });

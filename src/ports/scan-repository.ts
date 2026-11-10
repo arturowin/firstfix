@@ -86,6 +86,12 @@ export interface ReportData {
   unchecked: UncheckedView[];
 }
 
+export interface StaleCursor {
+  updatedAt: Date;
+  id: string;
+}
+export type StaleScan = StaleCursor;
+
 /** The attempt a worker holds. Every write below is fenced by it (WHERE id = $1 AND attempt = $2). */
 export interface ClaimedScan {
   scanId: string;
@@ -130,8 +136,11 @@ export interface ScanRepository {
    * regardless of attempt, and bumps `attempt` so a zombie worker's later writes match nothing.
    */
   failIfOpen(scanId: string, reason: { code: string; message: string }): Promise<boolean>;
-  /** Non-terminal scans not updated for `olderThanSeconds`, oldest first. */
-  findStale(olderThanSeconds: number, limit: number): Promise<string[]>;
+  /**
+   * Non-terminal scans not updated for `olderThanSeconds`, oldest first, strictly after `after` (keyset
+   * pagination, so a sweep can move past stale scans that are healthy, e.g. a queued backlog).
+   */
+  findStale(olderThanSeconds: number, limit: number, after?: StaleCursor | null): Promise<StaleScan[]>;
   /** Terminal outcome without findings. */
   finish(
     claim: ClaimedScan,

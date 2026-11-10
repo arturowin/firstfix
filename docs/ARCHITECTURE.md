@@ -146,6 +146,9 @@ COMMIT;
 - Implemented in M4 (`application/lost-scans.ts`, wired in `worker/scan-worker.ts`): the sweeper runs in every
   worker every 60 s (`SWEEP_INTERVAL_MS`) with staleness 600 s (`SWEEP_STALE_AFTER_SECONDS`: expiry 300 s +
   backoff + margin); several workers sweeping at once is harmless (the update only matches open scans).
+  Each sweep checks at most 500 stale scans in pages of 100, resuming from where the last sweep stopped (keyset
+  cursor on `(updated_at, id)`, kept in memory) and wrapping at the end, so a backlog of healthy stale scans
+  can't hide a lost one (review finding, M4).
 - Dead-letter handler and sweeper both do
   `UPDATE scans SET status='failed', attempt = attempt + 1, ... WHERE id = $1 AND status NOT IN (terminal)`.
   Bumping `attempt` fences any zombie worker: its later writes match 0 rows and it stops.
@@ -256,7 +259,9 @@ OSV.dev is the only advisory source implemented. It sits behind the `VulnDatabas
   (neutral type below), `references`. Packages it could not check are reported per package
   (`lookup` → `{ advisories, failed }`), so coverage can be partial; it rejects only when the job's signal
   aborts, never with provider HTTP errors. The OSV adapter retries each call once; a failed batch fails its
-  packages, a failed detail fetch fails every package citing that advisory.
+  packages, a failed detail fetch fails every package citing that advisory. Responses are validated inside the
+  same boundary: a malformed batch entry fails its package, a malformed record counts as a failed fetch, and
+  translation is isolated per package (review finding, M4).
 - Pipeline: some failed → `completed`, `partial`, `lookup_failed` rows, `failed_lookups`, said in the summary
   line; all failed → `TransientError` (retried; `failed` with the reason once retries run out, M4 decision).
 - **Neutral range type** (`src/domain/advisory.ts`, replaces the raw `affectedRanges: unknown[]`):

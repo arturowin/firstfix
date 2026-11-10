@@ -9,6 +9,8 @@ import type {
   ScanStage,
   ScanStatus,
   ScanView,
+  StaleCursor,
+  StaleScan,
   UncheckedView,
 } from '../../ports/scan-repository.ts';
 import type { AffectedRange, Severity } from '../../domain/advisory.ts';
@@ -297,15 +299,17 @@ export class PostgresScanRepository implements ScanRepository {
     return res.rowCount === 1;
   }
 
-  async findStale(olderThanSeconds: number, limit: number): Promise<string[]> {
-    // Uses the partial index on updated_at for non-terminal rows (migration 001).
-    const { rows } = await this.pool.query<{ id: string }>(
-      `SELECT id FROM scans
+  async findStale(olderThanSeconds: number, limit: number, after: StaleCursor | null = null): Promise<StaleScan[]> {
+    // Uses the partial index on updated_at for non-terminal rows (migration 001). (updated_at, id) is a total
+    // order, so pages neither repeat nor skip rows that didn't change in between.
+    const { rows } = await this.pool.query<{ id: string; updated_at: Date }>(
+      `SELECT id, updated_at FROM scans
         WHERE status NOT IN ${TERMINAL} AND updated_at < now() - make_interval(secs => $1)
-        ORDER BY updated_at LIMIT $2`,
-      [olderThanSeconds, limit],
+          AND ($3::timestamptz IS NULL OR (updated_at, id) > ($3::timestamptz, $4::uuid))
+        ORDER BY updated_at, id LIMIT $2`,
+      [olderThanSeconds, limit, after?.updatedAt ?? null, after?.id ?? null],
     );
-    return rows.map((r) => r.id);
+    return rows.map((r) => ({ id: r.id, updatedAt: r.updated_at }));
   }
 
   async markRetrying(claim: ClaimedScan, reason: { code: string; message: string }): Promise<boolean> {
