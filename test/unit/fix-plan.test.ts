@@ -124,7 +124,7 @@ describe('grouping into actions', () => {
       scheme,
     );
     expect(describeAction(a ?? expect.fail(), npm.hints).steps[0]).toBe(
-      'qs 6.5.5 (via request, runtime): candidate 6.5.6 addresses 1 of 1 advisory on 6.5.5 according to advisory data. Upgrade request to a version that depends on it, or use an `overrides` entry in package.json.',
+      'qs 6.5.5 (via request, runtime): candidate 6.5.6 addresses 1 of 1 advisory on 6.5.5 according to advisory data. Upgrade request to a version that pulls in qs 6.5.6 or later, or use an `overrides` entry in package.json.',
     );
   });
 

@@ -93,7 +93,7 @@ export function describeAction(a: Action, hints: RemediationHints): ActionText {
     if (v.candidate) {
       const route = v.isDirect
         ? `\`${hints.upgradeCommand(a.package, v.candidate.version)}\``
-        : `upgrade ${list(v.directParents)} to a version that depends on it, or use ${hints.transitiveFix}`;
+        : `upgrade ${list(v.directParents)} to a version that pulls in ${a.package} ${v.candidate.version} or later, or use ${hints.transitiveFix}`;
       steps.push(`${at}: ${candidateText(v.installedVersion, v.candidate, v.advisories.length)}. ${capitalize(route)}.`);
       if (v.candidate.majorJump) {
         steps.push(

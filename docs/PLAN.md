@@ -28,7 +28,7 @@ Rule: one milestone at a time. A milestone is done only when its gate passes and
 Tests: URL normalization, idempotency (incl. 409), lockfile parser basics, one integration test with GitHub + OSV mocked.
 
 ## M2 · Actionable report
-- [ ] First: ecosystem seams (ARCHITECTURE.md "Ecosystems"; npm stays the only implementation, ~half a day)
+- [x] First: ecosystem seams (ARCHITECTURE.md "Ecosystems"; npm stays the only implementation, ~half a day)
       - migration `002_ecosystem.sql`: `ecosystem text NOT NULL DEFAULT 'npm'` on `findings` and `unchecked_deps`
         (in `findings_unique`), `scans.lockfile_path`; repository reads/writes both
       - ports: `RepoSource.readFile(repo, sha, path)` replaces `readLockfile`; `VulnDatabase.lookup` takes
@@ -38,23 +38,23 @@ Tests: URL normalization, idempotency (incl. 409), lockfile parser basics, one i
       - pipeline: try registered formats in order, store `lockfile_path`; error/UI copy derived from the registry
       - candidate selection, major-jump flag, agent-prompt command and clean-result CI hint (below) are written
         against the npm `VersionScheme` / remediation hints from the start
-- [ ] Then: provider-neutral advisory source (ARCHITECTURE.md "Advisory source"; OSV stays the only adapter, ~1 h)
+- [x] Then: provider-neutral advisory source (ARCHITECTURE.md "Advisory source"; OSV stays the only adapter, ~1 h)
       - `AffectedRange` in `src/domain/advisory.ts` replaces raw `affectedRanges: unknown[]`; the OSV adapter converts
         `introduced`/`fixed`/`last_affected` events into it; `findings.affected_ranges` stores the neutral shape
       - the OSV adapter sets `isMalicious`; the domain no longer inspects `MAL-` ids
       - shared `VulnDatabase` contract suite (`test/contract/vuln-database.contract.ts`), run by the OSV adapter test
       - report names the advisory data source next to coverage
-- [ ] Only lockfileVersion 2/3 supported; others → `unsupported` with reason
-- [ ] Lockfile parsing rules from ARCHITECTURE.md (link, sources, dev/optional/devOptional, direct, dedupe, path aggregation)
-- [ ] OSV chunking (≤1000), pagination, detail fetch deduped with a concurrency limit, failed-lookup accounting
-- [ ] Counts: checked, unsupported-source entries, failed lookups; zero-dependency lockfile handled
-- [ ] Ranking policy as documented (malicious first, then severity, runtime/dev, direct/transitive)
-- [ ] Malicious packages (`MAL-`) as a separate category with "remove + rotate secrets" action
-- [ ] Recommended next actions grouped by package; candidate version labelled; direct parent named for transitive; "no fixed version published" guidance; major-version jumps flagged
-- [ ] Deterministic summary line at the top
-- [ ] Coding-agent prompt from template; preview before copy
-- [ ] Clean result screen as documented; never "secure"
-- [ ] Report follows the frozen layout; coverage beside the summary
+- [x] Only lockfileVersion 2/3 supported; others → `unsupported` with reason
+- [x] Lockfile parsing rules from ARCHITECTURE.md (link, sources, dev/optional/devOptional, direct, dedupe, path aggregation)
+- [x] OSV chunking (≤1000), pagination, detail fetch deduped with a concurrency limit, failed-lookup accounting
+- [x] Counts: checked, unsupported-source entries, failed lookups; zero-dependency lockfile handled
+- [x] Ranking policy as documented (malicious first, then severity, runtime/dev, direct/transitive)
+- [x] Malicious packages (`MAL-`) as a separate category with "remove + rotate secrets" action
+- [x] Recommended next actions grouped by package; candidate version labelled; direct parent named for transitive; "no fixed version published" guidance; major-version jumps flagged
+- [x] Deterministic summary line at the top
+- [x] Coding-agent prompt from template; preview before copy
+- [x] Clean result screen as documented; never "secure"
+- [x] Report follows the frozen layout; coverage beside the summary
 **Gate:** someone reading the report knows what to do first and what was checked.
 Tests: lockfile parser (each rule), ranking policy, candidate-version selection (multiple ranges, no fix,
 several advisories on one package, major jump), grouping, malicious path, prompt template snapshot.

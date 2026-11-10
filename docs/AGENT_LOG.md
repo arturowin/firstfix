@@ -89,3 +89,26 @@ One entry per milestone (or per notable session). Keep it factual.
   repo completed in ~5 s at its pinned commit (107 deps, 106 checked, 1 git dep unchecked, 39 advisories in
   16 package versions incl. the MAL- record); Idempotency-Key replay → 200; nonexistent repo → failed
   "not found or private" without retry. UI routes served; not yet clicked through in a browser.
+
+### 2026-11-10 · M2 actionable report
+- **Agent did:** ecosystem seams (format registry, `readFile`, ecosystem-keyed lookups, migration 002, a
+  test-only ecosystem through the real pipeline); provider-neutral advisory source (`AffectedRange`, OSV
+  translation in the adapter, shared contract suite, data source stored per scan); npm version scheme
+  (`semver`) and candidate selection; npm install graph (direct parents, ≤5 shortest paths); ranking, fix
+  plan, summary line, agent prompt (snapshot); report API; UI in the frozen layout with clean result and
+  prompt preview. One commit per green step.
+- **Decisions agreed before coding:** workspace declarations count as direct; 0.x major jump = leftmost
+  non-zero part changes; actions built on read from stored findings, summary line stored; one action per
+  package name; malicious detection only from structured data.
+- **Found along the way:** GitHub's malware advisories carry `cwe_ids: ["CWE-506"]` (verified on the recorded
+  fixtures), so the OSV adapter flags them without title matching. The prompt snapshot caught a downgrade
+  counted as a major jump and package names being capitalized in headlines; both fixed.
+- **Deviations from the written plan:** the ecosystem is attached per format rather than per parsed package;
+  a parse result can be `invalid` (unreadable) besides `unsupported`; `fix_status` column (migration 004) so
+  "no fixed version published" and "see the advisory" are told apart; severity labels moved from the domain
+  into the OSV adapter.
+- **Verified by:** 208 tests green (typecheck, lint); live stack against real GitHub and OSV: demo repo →
+  "1 known malicious package and 14 packages with known vulnerabilities (2 critical, 5 high, 4 medium,
+  3 low) in 106 of 107 dependencies checked. Start with: remove flatmap-stream", 15 ranked actions, major
+  jumps flagged with a compatible alternative (postcss 7.0.36 vs 8.5.23). UI bundle served; not yet clicked
+  through in a browser.

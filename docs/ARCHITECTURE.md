@@ -291,7 +291,14 @@ OSV.dev is the only advisory source implemented. It sits behind the `VulnDatabas
 Fix information shapes the action, not the rank.
 
 ### Recommended next actions
-- Group by package. At most three on the summary; the rest below.
+- Group by package name (one action across all installed versions, a line per version). At most three on the
+  summary; the rest below. Built on read from stored findings (`src/application/report.ts`, pure domain
+  functions); `summary_line` is stored at completion. Each finding stores `candidate_version` and `fix_status`
+  (`candidate` | `no_fix` | `unknown`).
+- Action kinds: `remove_malicious`, `upgrade` (some version has a candidate), `no_fix`, `review` (ranges don't
+  place the version, or no version scheme). Each action has deterministic what / why first / how to verify.
+- Major jump (npm): the candidate leaves `^installed`, so on 0.x the leftmost non-zero part changing counts
+  (0.3 → 0.4). Downgrades are never jumps.
 - Candidate version = the fix event in the affected range that contains the installed version, using the
   ecosystem's version scheme. Labelled "candidate"; compatibility, resolution and tests still to verify.
   Flag major-version jumps. No version scheme for the ecosystem → no candidate (see "Ecosystems").
