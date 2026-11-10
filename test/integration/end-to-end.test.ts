@@ -14,6 +14,7 @@ import { PostgresScanSubmission } from '../../src/adapters/postgres/scan-submiss
 import { SCAN_QUEUE, type ScanJobData } from '../../src/adapters/pgboss/queue.ts';
 import { ScanPipeline } from '../../src/application/scan-pipeline.ts';
 import { ScanService } from '../../src/application/scan-service.ts';
+import { TemplateExplainer } from '../../src/adapters/template-explainer.ts';
 import { createTestEnv, type TestEnv } from '../support/env.ts';
 
 const FIXTURES = path.join(import.meta.dirname, '..', 'fixtures');
@@ -59,7 +60,13 @@ describe('end to end: submit → worker → report', () => {
     env = await createTestEnv();
     const scans = new PostgresScanRepository(env.pool);
     service = new ScanService(new PostgresScanSubmission(env.pool, env.boss), scans);
-    const pipeline = new ScanPipeline({ scans, source: new GitHubRepoSource(), vulns: new OsvVulnDatabase() });
+    const pipeline = new ScanPipeline({
+      scans,
+      source: new GitHubRepoSource(),
+      vulns: new OsvVulnDatabase(),
+      // As the worker wires it; the AI explainer fails, so the template must carry the report.
+      explain: { ai: { explain: () => Promise.reject(new Error('provider down')) }, template: new TemplateExplainer(), timeoutMs: 1000 },
+    });
     await env.boss.work<ScanJobData>(SCAN_QUEUE, { pollingIntervalSeconds: 0.5 }, async ([job]) => {
       if (job) await pipeline.run(job.data.scanId, job.signal);
     });
@@ -129,6 +136,15 @@ describe('end to end: submit → worker → report', () => {
     expect(report?.findings[0]?.package).toBe('flatmap-stream'); // findings ranked too
     expect(report?.ciChecks).toEqual(['Dependabot alerts', '`npm audit` in CI']);
     expect(report?.agentPrompt).toContain(`at commit ${SHA}`);
+
+    // AI failed → template prose, labelled, for the summary and every action; stored with the scan.
+    expect(report?.explanation).toMatchObject({ source: 'template', text: expect.stringMatching(/^Start with the known malicious package/) as string });
+    expect(report?.actions.every((a) => a.whyItMatters?.source === 'template')).toBe(true);
+    const row = await env.pool.query<{ explanation_source: string; explanation: { fallbackReason?: string } }>(
+      'SELECT explanation_source, explanation FROM scans WHERE id = $1',
+      [submitted.scanId],
+    );
+    expect(row.rows[0]).toMatchObject({ explanation_source: 'template', explanation: { fallbackReason: 'error: Error: provider down' } });
   });
 
   it('a missing repository ends failed with a clear reason, without retries', async () => {

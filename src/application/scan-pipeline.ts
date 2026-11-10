@@ -1,5 +1,6 @@
 import { selectCandidate } from '../domain/candidate.ts';
 import { buildFixPlan, type PlanFinding } from '../domain/fix-plan.ts';
+import { explainPlan, type ExplainDeps } from './explain.ts';
 import { summaryLine } from '../domain/report-text.ts';
 import { defaultRegistry, missingLockfileMessage } from '../domain/ecosystems/registry.ts';
 import type { EcosystemRegistry, LockfileFormat } from '../domain/ecosystems/types.ts';
@@ -30,11 +31,21 @@ export class ScanPipeline {
   private readonly vulns: VulnDatabase;
   private readonly registry: EcosystemRegistry;
 
-  constructor(deps: { scans: ScanRepository; source: RepoSource; vulns: VulnDatabase; registry?: EcosystemRegistry }) {
+  private readonly explain: ExplainDeps | null;
+
+  /** `explain` null: no prose is written (tests that don't look at it). The worker always configures it. */
+  constructor(deps: {
+    scans: ScanRepository;
+    source: RepoSource;
+    vulns: VulnDatabase;
+    registry?: EcosystemRegistry;
+    explain?: ExplainDeps | null;
+  }) {
     this.scans = deps.scans;
     this.source = deps.source;
     this.vulns = deps.vulns;
     this.registry = deps.registry ?? defaultRegistry;
+    this.explain = deps.explain ?? null;
   }
 
   async run(scanId: string, signal: AbortSignal): Promise<RunResult> {
@@ -106,9 +117,19 @@ export class ScanPipeline {
     const counts = { totalDeps, checkedDeps: packages.length, unsupportedDeps: uncheckable.length, failedLookups: 0 };
     const plan = buildFixPlan(findings.map(toPlanFinding), (e) => this.registry.ecosystems.get(e)?.versionScheme ?? null);
 
+    const line = summaryLine({ counts, lockfilePath: found.path, actions: plan });
+    const explanation = this.explain
+      ? await explainPlan(
+          this.explain,
+          { repo: `${claim.repo.owner}/${claim.repo.name}`, summaryLine: line, checkedDeps: counts.checkedDeps, totalDeps, actions: plan },
+          signal,
+        )
+      : null;
+
     const saved = await this.scans.complete(claim, {
       advisorySource: this.vulns.source.name,
-      summaryLine: summaryLine({ counts, lockfilePath: found.path, actions: plan }),
+      summaryLine: line,
+      explanation,
       counts,
       // "full" = every supported dependency in the root lockfile was checked (unsupported sources are listed
       // separately). Partial coverage from failed lookups arrives in M4.

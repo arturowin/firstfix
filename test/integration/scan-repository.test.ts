@@ -29,6 +29,7 @@ describe('PostgresScanRepository: attempt ownership', () => {
   const completion: Completion = {
     advisorySource: 'OSV.dev',
     summaryLine: '1 package with known vulnerabilities (1 medium) in 2 of 3 dependencies checked.',
+    explanation: null,
     counts: { totalDeps: 3, checkedDeps: 2, unsupportedDeps: 1, failedLookups: 0 },
     coverage: 'full',
     findings: [

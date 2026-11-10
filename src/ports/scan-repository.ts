@@ -1,5 +1,6 @@
 import type { Advisory, AffectedRange, Severity } from '../domain/advisory.ts';
 import type { FixStatus } from '../domain/candidate.ts';
+import type { StoredExplanation } from '../domain/explanation.ts';
 import type { EcosystemId } from '../domain/ecosystems/types.ts';
 import type { Scope } from '../domain/lockfile.ts';
 
@@ -23,6 +24,8 @@ export interface ScanView {
   advisorySource: string | null;
   /** Deterministic one-line summary, written at completion. */
   summaryLine: string | null;
+  /** Prose written at completion (AI or template); null for scans completed without one. */
+  explanation: StoredExplanation | null;
   status: ScanStatus;
   stage: ScanStage | null;
   counts: ScanCounts;
@@ -93,6 +96,7 @@ export interface ClaimedScan {
 export interface Completion {
   advisorySource: string;
   summaryLine: string;
+  explanation: StoredExplanation | null;
   counts: ScanCounts;
   coverage: 'full' | 'partial';
   findings: FindingInput[];

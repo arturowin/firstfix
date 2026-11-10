@@ -49,6 +49,7 @@ function reportJson(r: Report) {
   return {
     scan: scanJson(r.scan),
     summary: r.summary,
+    explanation: r.explanation,
     ciChecks: r.ciChecks,
     actions: r.actions,
     findings: r.findings,

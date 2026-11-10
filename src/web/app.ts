@@ -58,11 +58,19 @@ interface ActionJson {
   onSummary: boolean;
   versions: ActionVersionJson[];
   text: { headline: string; steps: string[]; why: string; verify: string } | null;
+  whyItMatters: ProseJson | null;
+}
+
+/** Prose: AI-written (checked against the scan data) or from the template. Never a source of facts. */
+interface ProseJson {
+  text: string;
+  source: 'ai' | 'template';
 }
 
 interface ReportJson {
   scan: ScanJson;
   summary: string | null;
+  explanation: ProseJson | null;
   ciChecks: string[];
   actions: ActionJson[];
   findings: FindingJson[];
@@ -266,6 +274,7 @@ function summaryCard(report: ReportJson): HTMLElement {
   const box = el('section', undefined, 'card');
   box.append(repoTitle(scan));
   box.append(el('p', report.summary ?? '', 'summary'));
+  if (report.explanation) box.append(prose(report.explanation, 'explanation'));
   const meta = el('ul', undefined, 'meta');
   const coverage =
     scan.coverage === 'partial'
@@ -310,7 +319,9 @@ function actionCard(a: ActionJson, findings: FindingJson[]): HTMLElement {
     const steps = el('ul', undefined, 'steps');
     for (const s of a.text.steps) steps.append(richText('li', s));
     card.append(steps);
-    card.append(labelled('Why first', a.text.why), labelled('How to verify', a.text.verify));
+    card.append(labelled('Why first', a.text.why));
+    if (a.whyItMatters) card.append(prose(a.whyItMatters, 'why-matters', 'Why it matters: '));
+    card.append(labelled('How to verify', a.text.verify));
   } else {
     card.append(el('h3', `${a.package} (${a.ecosystem})`), el('p', 'See the advisories for fixed versions.', 'muted'));
   }
@@ -356,6 +367,20 @@ function routesOf(pkg: string, v: ActionVersionJson): string[] {
   if (v.directAs.length > 0) out.push(v.directAs.every((n) => n === pkg) ? 'direct' : `direct as ${v.directAs.join(', ')}`);
   if (v.directParents.length > 0) out.push(`via ${v.directParents.join(', ')}`);
   return out.length > 0 ? out : ['transitive'];
+}
+
+const SOURCE_LABEL: Record<ProseJson['source'], { tag: string; title: string }> = {
+  ai: { tag: 'AI', title: 'Written by an AI model and checked against the scan data. Versions, IDs and steps come from the scan, not from this text.' },
+  template: { tag: 'Template', title: 'Generated from the scan data by a fixed template.' },
+};
+
+/** A piece of prose with its source shown beside it, so AI text is never mistaken for scan facts. */
+function prose(p: ProseJson, className: string, lead = ''): HTMLElement {
+  const box = el('p', undefined, `prose ${className}`);
+  const tag = el('span', SOURCE_LABEL[p.source].tag, `source source-${p.source}`);
+  tag.title = SOURCE_LABEL[p.source].title;
+  box.append(tag, ' ', lead ? el('strong', lead) : '', p.text);
+  return box;
 }
 
 function labelled(label: string, text: string): HTMLElement {

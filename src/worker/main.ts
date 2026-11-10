@@ -6,6 +6,7 @@ import { createPool } from '../adapters/postgres/pool.ts';
 import { PostgresScanRepository } from '../adapters/postgres/scan-repository.ts';
 import { ensureQueues, SCAN_QUEUE, type ScanJobData } from '../adapters/pgboss/queue.ts';
 import { ScanPipeline } from '../application/scan-pipeline.ts';
+import { TemplateExplainer } from '../adapters/template-explainer.ts';
 
 const databaseUrl = process.env['DATABASE_URL'];
 if (!databaseUrl) {
@@ -26,6 +27,11 @@ const pipeline = new ScanPipeline({
   scans: new PostgresScanRepository(pool),
   source: new GitHubRepoSource({ token: process.env['GITHUB_TOKEN'] || undefined }),
   vulns: new OsvVulnDatabase(),
+  explain: {
+    ai: null, // M3 step 2: LLM explainer from LLM_PROVIDER / LLM_API_KEY / LLM_MODEL
+    template: new TemplateExplainer(),
+    timeoutMs: Number(process.env['LLM_TIMEOUT_MS'] ?? 20_000),
+  },
 });
 
 await boss.work<ScanJobData>(SCAN_QUEUE, { localConcurrency: concurrency, pollingIntervalSeconds: 1 }, async ([job]) => {
