@@ -10,6 +10,8 @@
  *   workspace folders are project code (their dependencies are declarations of their own), so they end a walk.
  */
 
+import { workspaceMatcher } from './workspaces.ts';
+
 const NODE_MODULES = 'node_modules/';
 const PROJECT_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies'];
 const INSTALLED_FIELDS = ['dependencies', 'optionalDependencies', 'peerDependencies'];
@@ -50,8 +52,13 @@ function depNames(entry: unknown, fields: string[]): string[] {
   });
 }
 
-export function buildInstallGraph(packages: Record<string, unknown>): InstallGraph {
-  const isWorkspaceFolder = (location: string) => location !== '' && !isInstalled(location) && location in packages;
+export function buildInstallGraph(
+  packages: Record<string, unknown>,
+  isWorkspace: (location: string) => boolean = workspaceMatcher(packages['']),
+): InstallGraph {
+  // Project code: the root's declared workspaces (that exist in the lockfile). Other folders a link points at
+  // (file: dependencies) are dependencies, walked like any installed package.
+  const isWorkspaceFolder = (location: string) => !isInstalled(location) && location in packages && isWorkspace(location);
 
   /** Where `name`, required from the package at `from`, is installed; null if missing or project code. */
   const resolve = (from: string, name: string): string | null => {

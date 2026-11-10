@@ -57,9 +57,38 @@ describe('parseLockfile', () => {
     ]);
   });
 
-  it('skips link: true entries entirely', () => {
-    const r = parseLockfile(lock({ 'node_modules/@x/ws': { resolved: 'packages/ws', link: true } }));
+  it('skips links into the project’s own workspaces', () => {
+    const r = parseLockfile(
+      lock({
+        '': { workspaces: ['packages/*'] },
+        'packages/ws': { name: '@x/ws', version: '0.1.0' },
+        'node_modules/@x/ws': { resolved: 'packages/ws', link: true },
+      }),
+    );
     expect(r).toEqual({ kind: 'ok', packages: [], uncheckable: [] });
+  });
+
+  it('a file: link (real npm 10 lockfile) is a dependency we can’t check, not a workspace', () => {
+    const fileLink = parseLockfile(
+      JSON.parse(readFileSync(path.join(import.meta.dirname, '..', 'fixtures', 'lockfiles', 'file-link.package-lock.json'), 'utf8')),
+    );
+    // Review reproduction: this used to come back with zero packages and zero unchecked entries.
+    expect(fileLink).toEqual({
+      kind: 'ok',
+      packages: [],
+      uncheckable: [{ name: 'local-lib', version: '2.0.0', reason: 'unsupported_source' }],
+    });
+  });
+
+  it('a link to a folder inside the repo that isn’t a declared workspace is also unchecked', () => {
+    const r = parseLockfile(
+      lock({
+        '': { workspaces: ['packages/*'] },
+        'vendor/x': { name: 'x', version: '1.0.0' },
+        'node_modules/x': { resolved: 'vendor/x', link: true },
+      }),
+    );
+    expect(r.kind === 'ok' && r.uncheckable).toEqual([{ name: 'x', version: '1.0.0', reason: 'unsupported_source' }]);
   });
 
   it('non-registry sources are uncheckable; a missing resolved is tolerated', () => {

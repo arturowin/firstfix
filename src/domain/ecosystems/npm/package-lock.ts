@@ -6,6 +6,7 @@ import { MAX_INSTALL_PATHS, type LockedPackage, type ParseLockfileResult, type S
 import type { LockfileFormat } from '../types.ts';
 import { buildInstallGraph } from './graph.ts';
 import { isValidNpmName } from './name.ts';
+import { workspaceMatcher } from './workspaces.ts';
 
 const NPM_REGISTRY = 'https://registry.npmjs.org/';
 const SCOPE_RANK: Record<Scope, number> = { runtime: 2, optional: 1, dev: 0 };
@@ -54,7 +55,8 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
   const packages = json['packages'];
   if (!isRecord(packages)) return { kind: 'unsupported', reason: 'package-lock.json has no "packages" section' };
 
-  const graph = buildInstallGraph(packages);
+  const isWorkspace = workspaceMatcher(packages['']);
+  const graph = buildInstallGraph(packages, isWorkspace);
   const byKey = new Map<string, LockedPackage & { parentSet: Set<string> }>();
   const uncheckable = new Map<string, UncheckablePackage>();
 
@@ -63,7 +65,20 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
     const at = path.lastIndexOf(NODE_MODULES);
     if (at === -1 || !isRecord(value)) continue;
     const entry = value as RawEntry;
-    if (entry.link === true) continue; // workspace symlink: its own dependencies are listed separately
+    if (entry.link === true) {
+      // A link into one of the project's workspaces is project code. Any other link (`file:../local`, a folder
+      // outside the workspaces) is a dependency we can't check against registry advisories: say so.
+      const target = typeof entry.resolved === 'string' ? entry.resolved : null;
+      if (target !== null && isWorkspace(target)) continue;
+      const linkName = path.slice(at + NODE_MODULES.length);
+      const targetEntry = target !== null ? packages[target] : undefined;
+      const linkVersion = isRecord(targetEntry) && typeof targetEntry['version'] === 'string' ? targetEntry['version'] : null;
+      const shown = linkName.slice(0, 214);
+      const reason = isValidNpmName(linkName) ? 'unsupported_source' : 'invalid_name';
+      const k = `${reason}:${shown}@${linkVersion ?? ''}`;
+      if (!uncheckable.has(k)) uncheckable.set(k, { name: shown, version: linkVersion, reason });
+      continue;
+    }
 
     // The folder name is what the project imports; `name` is the real package when they differ
     // (npm aliases: "my-lodash": "npm:lodash@4.17.20"). Advisories are published under the real name.
