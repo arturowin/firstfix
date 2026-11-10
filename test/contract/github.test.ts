@@ -152,6 +152,27 @@ describe('GitHubRepoSource', () => {
     expect(err).not.toBeInstanceOf(PermanentError);
   });
 
+  it('enforces the size limit while streaming, without trusting content-length (review finding)', async () => {
+    let pulled = 0;
+    server.use(
+      http.get(`${RAW}/owner/repo/:sha/package-lock.json`, () => {
+        // An endless body with no content-length: only a streaming cap can stop it.
+        const stream = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            pulled++;
+            controller.enqueue(new Uint8Array(256).fill(120));
+          },
+        });
+        return new HttpResponse(stream, { headers: { 'content-type': 'application/json' } });
+      }),
+    );
+    await expect(
+      new GitHubRepoSource({ maxFileBytes: 1024 }).readFile(repo, SHA, 'package-lock.json', signal()),
+    ).rejects.toMatchObject({ code: 'lockfile_too_large', outcome: 'unsupported' });
+    // The endless body was cut off: only the HTTP stack's read-ahead (~64 KB) was pulled, not an unbounded amount.
+    expect(pulled).toBeLessThan(1024);
+  });
+
   it('refuses lockfiles over the size limit (unsupported)', async () => {
     server.use(http.get(`${RAW}/owner/repo/:sha/package-lock.json`, () => HttpResponse.text('x'.repeat(2048))));
     await expect(

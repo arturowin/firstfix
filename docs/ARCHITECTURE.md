@@ -244,6 +244,10 @@ attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
   upwards); installed packages contribute `dependencies`, `optionalDependencies`, `peerDependencies` (not
   `devDependencies`); links into workspace folders end a walk. Breadth-first from each direct dependency gives
   every direct parent and the shortest path from each; paths are capped at 5 per package version.
+  Bounded while walking (review finding): predecessor pointers instead of path copies, at most 5 paths built
+  per location, and a 5,000,000-step budget past which parents/paths are left empty (never partly filled);
+  a 42 KB worst-case lockfile went from ~185 MiB / 1.2 s to ~24 MiB / 0.1 s. Only links into declared
+  `workspaces` are project code; other `link: true` entries (e.g. `file:../local`) are unchecked dependencies.
 - Dedupe by `name@version` before the advisory lookup.
 - Tolerate entries without `resolved`/`integrity`.
 - Package names and aliases must be valid npm names (`src/domain/ecosystems/npm/name.ts`): they come from a

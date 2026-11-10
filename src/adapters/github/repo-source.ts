@@ -79,9 +79,11 @@ export class GitHubRepoSource implements RepoSource {
     if (!res.ok) throw classify(res, 'raw');
 
     const declared = Number(res.headers.get('content-length') ?? 0);
-    if (declared > this.maxFileBytes) throw tooLarge(path, this.maxFileBytes);
-    const text = await res.text();
-    if (Buffer.byteLength(text) > this.maxFileBytes) throw tooLarge(path, this.maxFileBytes);
+    if (declared > this.maxFileBytes) {
+      await res.body?.cancel();
+      throw tooLarge(path, this.maxFileBytes);
+    }
+    const text = await readCapped(res, this.maxFileBytes, () => tooLarge(path, this.maxFileBytes));
     return text;
   }
 
@@ -131,4 +133,26 @@ function classify(res: Response, kind: 'api' | 'raw'): Error {
   }
   if (res.status >= 500) return new TransientError('github_unavailable', `GitHub answered ${res.status}`);
   return new PermanentError('github_error', `GitHub answered ${res.status}`);
+}
+
+/**
+ * Reads the body as it streams, stopping as soon as it passes `max` bytes: a missing or wrong content-length
+ * can't make the worker buffer an arbitrarily large file.
+ */
+async function readCapped(res: Response, max: number, tooBig: () => Error): Promise<string> {
+  if (!res.body) return '';
+  const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel();
+      throw tooBig();
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }

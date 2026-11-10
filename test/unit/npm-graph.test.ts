@@ -105,3 +105,33 @@ describe('npm install graph', () => {
     expect([...g.direct]).toEqual(['node_modules/a']);
   });
 });
+
+describe('npm install graph: bounded work and memory (review finding)', () => {
+  // 300 direct dependencies all reaching one shared 300-package chain: a ~42 KB lockfile that used to build
+  // ~90,000 path arrays (about 185 MiB of heap).
+  const D = 300;
+  const C = 300;
+  const packages: Record<string, unknown> = {
+    '': { dependencies: Object.fromEntries(Array.from({ length: D }, (_, i) => [`d${String(i)}`, '1'])) },
+  };
+  for (let i = 0; i < D; i++) packages[`node_modules/d${String(i)}`] = v('1.0.0', { c0: '1' });
+  for (let i = 0; i < C; i++) packages[`node_modules/c${String(i)}`] = v('1.0.0', i + 1 < C ? { [`c${String(i + 1)}`]: '1' } : {});
+
+  it('keeps at most 5 paths per location while walking, and every direct parent', () => {
+    const g = buildInstallGraph(packages);
+    expect(g.complete).toBe(true);
+    const stored = [...g.reach.values()].reduce((n, r) => n + r.paths.length, 0);
+    expect(stored).toBeLessThanOrEqual(5 * g.reach.size);
+    const tail = g.reach.get(`node_modules/c${String(C - 1)}`);
+    expect(tail?.parents.size).toBe(D);
+    expect(tail?.paths).toHaveLength(5);
+    expect(tail?.paths[0]?.length).toBe(C + 1);
+  });
+
+  it('past the step budget, parents and paths are left empty rather than partly filled; direct stays complete', () => {
+    const g = buildInstallGraph(packages, () => false, 1000);
+    expect(g.complete).toBe(false);
+    expect([...g.reach.values()].every((r) => r.parents.size === 0 && r.paths.length === 0)).toBe(true);
+    expect(g.direct.size).toBe(D);
+  });
+});
