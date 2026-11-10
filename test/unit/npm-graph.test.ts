@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildInstallGraph } from '../../src/domain/ecosystems/npm/graph.ts';
+import { buildInstallGraph, MAX_PATH_SEGMENTS, PATH_ELLIPSIS } from '../../src/domain/ecosystems/npm/graph.ts';
 import { parsePackageLock } from '../../src/domain/ecosystems/npm/package-lock.ts';
 import type { LockedPackage } from '../../src/domain/lockfile.ts';
 
@@ -39,6 +39,7 @@ describe('npm install graph', () => {
       name: 'shared',
       installedAs: [],
       directAs: ['shared'],
+      contextTruncated: false,
       version: '1.0.0',
       scope: 'runtime',
       isDirect: true,
@@ -125,7 +126,10 @@ describe('npm install graph: bounded work and memory (review finding)', () => {
     const tail = g.reach.get(`node_modules/c${String(C - 1)}`);
     expect(tail?.parents.size).toBe(D);
     expect(tail?.paths).toHaveLength(5);
-    expect(tail?.paths[0]?.length).toBe(C + 1);
+    // 301 segments deep: kept as root, ellipsis and the last 10, and flagged.
+    expect(tail?.paths[0]).toHaveLength(MAX_PATH_SEGMENTS);
+    expect(tail?.paths[0]?.[1]).toBe(PATH_ELLIPSIS);
+    expect(tail?.truncated).toBe(true);
   });
 
   it('past the step budget, parents and paths are left empty rather than partly filled; direct stays complete', () => {
@@ -133,5 +137,28 @@ describe('npm install graph: bounded work and memory (review finding)', () => {
     expect(g.complete).toBe(false);
     expect([...g.reach.values()].every((r) => r.parents.size === 0 && r.paths.length === 0)).toBe(true);
     expect(g.direct.size).toBe(D);
+  });
+});
+
+describe('deep chains: path work and memory bounded through the normal parse (review finding)', () => {
+  // One direct dependency, then a chain of 3,999 edges (~270 KB lockfile): full paths retained ~8,000,000
+  // entries (~265 MiB). Paths are now capped while building, and the cut is explicit.
+  const N = 4000;
+  const packages: Record<string, unknown> = { '': { dependencies: { c0: '1' } } };
+  for (let i = 0; i < N; i++) packages[`node_modules/c${String(i)}`] = v('1.0.0', i + 1 < N ? { [`c${String(i + 1)}`]: '1' } : {});
+
+  it('every stored path is at most MAX_PATH_SEGMENTS long; deep packages are flagged, shallow ones are not', () => {
+    const r = parsePackageLock({ lockfileVersion: 3, packages });
+    if (r.kind !== 'ok') throw new Error(r.kind);
+    const entries = r.packages.reduce((n, p) => n + p.installPaths.reduce((m, x) => m + x.length, 0), 0);
+    expect(entries).toBeLessThanOrEqual(N * MAX_PATH_SEGMENTS);
+    expect(r.packages.every((p) => p.installPaths.every((x) => x.length <= MAX_PATH_SEGMENTS))).toBe(true);
+
+    const deepest = r.packages.find((p) => p.name === `c${String(N - 1)}`);
+    expect(deepest).toMatchObject({ isDirect: false, directParents: ['c0'], contextTruncated: true });
+    expect(deepest?.installPaths[0]).toEqual(['c0', PATH_ELLIPSIS, ...Array.from({ length: 10 }, (_, i) => `c${String(N - 10 + i)}`)]);
+
+    const shallow = r.packages.find((p) => p.name === 'c5');
+    expect(shallow).toMatchObject({ contextTruncated: false, installPaths: [['c0', 'c1', 'c2', 'c3', 'c4', 'c5']] });
   });
 });

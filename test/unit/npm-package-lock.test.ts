@@ -102,7 +102,7 @@ describe('parseLockfile', () => {
     );
     expect(r).toEqual({
       kind: 'ok',
-      packages: [{ name: 'm', installedAs: [], directAs: [], version: '0.1.1', scope: 'runtime', isDirect: false, directParents: [], installPaths: [] }],
+      packages: [{ name: 'm', installedAs: [], directAs: [], contextTruncated: false, version: '0.1.1', scope: 'runtime', isDirect: false, directParents: [], installPaths: [] }],
       uncheckable: [
         { name: 'f', version: '1.0.0', reason: 'unsupported_source' },
         { name: 'g', version: '1.0.0', reason: 'unsupported_source' },

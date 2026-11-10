@@ -27,6 +27,11 @@ export interface LockedPackage {
   directParents: string[];
   /** Shortest install paths from direct dependencies, shortest first, capped at MAX_INSTALL_PATHS. */
   installPaths: string[][];
+  /**
+   * Dependency context (parents, paths) was cut to bound work: a path abbreviated around "…", or the graph walk
+   * stopped early. The package and its findings are unaffected; only the "how it got here" is incomplete.
+   */
+  contextTruncated: boolean;
 }
 
 export const MAX_INSTALL_PATHS = 5;

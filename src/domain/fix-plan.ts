@@ -28,6 +28,8 @@ export interface PlanFinding {
   fixStatus: FixStatus;
   /** The advisory's ranges for this package; null when not available (then nothing is claimed as addressed). */
   affectedRanges: AffectedRange[] | null;
+  /** Dependency context (parents, paths) was cut to bound work; absent on older stored rows. */
+  contextTruncated?: boolean;
 }
 
 export type ActionKind =
@@ -52,6 +54,8 @@ export interface ActionVersion {
   installedAs: string[];
   /** Every direct declaration of this version (each needs updating); empty if only transitive. */
   directAs: string[];
+  /** Its parents/paths are incomplete (bounded graph work); say so instead of implying there are none. */
+  contextTruncated: boolean;
   scope: Scope;
   isDirect: boolean;
   directParents: string[];
@@ -183,6 +187,7 @@ function planVersion(installed: string, findings: PlanFinding[], scheme: Version
   return {
     installedVersion: installed,
     installedAs: first?.installedAs ?? [],
+    contextTruncated: findings.some((f) => f.contextTruncated === true),
     // Rows stored before direct_as existed: fall back to the package name when it was direct.
     directAs: first && first.directAs.length > 0 ? first.directAs : first?.isDirect ? [first.package] : [],
     scope: first?.scope ?? 'runtime',

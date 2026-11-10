@@ -123,6 +123,7 @@ export class PostgresScanRepository implements ScanRepository {
       is_direct: boolean;
       direct_parents: string[];
       install_paths: string[][];
+      context_truncated: boolean;
       advisory_id: string;
       aliases: string[];
       severity: Severity;
@@ -133,7 +134,7 @@ export class PostgresScanRepository implements ScanRepository {
       affected_ranges: unknown;
       references: { type: string; url: string }[];
     }>(
-      `SELECT ecosystem, package, installed_as, direct_as, installed_version, scope, is_direct, direct_parents, install_paths, advisory_id, aliases, severity,
+      `SELECT ecosystem, package, installed_as, direct_as, installed_version, scope, is_direct, direct_parents, install_paths, context_truncated, advisory_id, aliases, severity,
               is_malicious, title, candidate_version, fix_status, affected_ranges, "references"
          FROM findings WHERE scan_id = $1 ORDER BY ecosystem, package, installed_version, advisory_id`,
       [scanId],
@@ -156,6 +157,7 @@ export class PostgresScanRepository implements ScanRepository {
           isDirect: f.is_direct,
           directParents: f.direct_parents,
           installPaths: f.install_paths,
+          contextTruncated: f.context_truncated,
           advisoryId: f.advisory_id,
           aliases: f.aliases,
           severity: f.severity,
@@ -221,17 +223,17 @@ export class PostgresScanRepository implements ScanRepository {
 
       if (c.findings.length > 0) {
         await client.query(
-          `INSERT INTO findings (scan_id, ecosystem, package, installed_as, direct_as, installed_version, scope, is_direct, direct_parents, install_paths,
+          `INSERT INTO findings (scan_id, ecosystem, package, installed_as, direct_as, installed_version, scope, is_direct, direct_parents, install_paths, context_truncated,
                                  advisory_id, aliases, severity, is_malicious, title, affected_ranges,
                                  candidate_version, fix_status, "references")
            SELECT $1, f.ecosystem, f.package, ARRAY(SELECT jsonb_array_elements_text(f.installed_as)),
                   ARRAY(SELECT jsonb_array_elements_text(f.direct_as)), f.installed_version, f.scope, f.is_direct,
-                  ARRAY(SELECT jsonb_array_elements_text(f.direct_parents)), f.install_paths,
+                  ARRAY(SELECT jsonb_array_elements_text(f.direct_parents)), f.install_paths, f.context_truncated,
                   f.advisory_id, ARRAY(SELECT jsonb_array_elements_text(f.aliases)), f.severity, f.is_malicious,
                   f.title, f.affected_ranges, f.candidate_version, f.fix_status, f."references"
              FROM jsonb_to_recordset($2::jsonb) AS f(
                   ecosystem text, package text, installed_as jsonb, direct_as jsonb, installed_version text, scope text, is_direct boolean, direct_parents jsonb,
-                  install_paths jsonb, advisory_id text, aliases jsonb, severity text, is_malicious boolean,
+                  install_paths jsonb, context_truncated boolean, advisory_id text, aliases jsonb, severity text, is_malicious boolean,
                   title text, affected_ranges jsonb, candidate_version text, fix_status text, "references" jsonb)`,
           [
             claim.scanId,
@@ -246,6 +248,7 @@ export class PostgresScanRepository implements ScanRepository {
                 is_direct: f.isDirect,
                 direct_parents: f.directParents,
                 install_paths: f.installPaths,
+                context_truncated: f.contextTruncated,
                 advisory_id: f.advisory.id,
                 aliases: f.advisory.aliases,
                 severity: f.advisory.severity,

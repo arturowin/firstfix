@@ -19,9 +19,19 @@ const INSTALLED_FIELDS = ['dependencies', 'optionalDependencies', 'peerDependenc
 export interface Reach {
   /** Names of the direct dependencies that pull this location in (itself excluded). */
   parents: Set<string>;
-  /** Shortest name path from each direct dependency that reaches it, e.g. ["express", "body-parser", "qs"]. */
+  /**
+   * Shortest name path from each direct dependency that reaches it, e.g. ["express", "body-parser", "qs"].
+   * Paths deeper than MAX_PATH_SEGMENTS keep the root and the last segments around PATH_ELLIPSIS.
+   */
   paths: string[][];
+  /** Some of this location's dependency context was cut (a path abbreviated, or the walk stopped early). */
+  truncated: boolean;
 }
+
+/** Marks the elided middle of an abbreviated path. Not a valid package name, so it can't be mistaken for one. */
+export const PATH_ELLIPSIS = '…';
+/** Longest path kept: root, the ellipsis, and the last MAX_PATH_SEGMENTS - 2 packages. */
+export const MAX_PATH_SEGMENTS = 12;
 
 export interface InstallGraph {
   /** Install locations that a project declaration resolves to. */
@@ -102,7 +112,7 @@ export function buildInstallGraph(
   const reach = new Map<string, Reach>();
   const reachOf = (location: string): Reach => {
     let r = reach.get(location);
-    if (!r) reach.set(location, (r = { parents: new Set(), paths: [] }));
+    if (!r) reach.set(location, (r = { parents: new Set(), paths: [], truncated: false }));
     return r;
   };
 
@@ -134,12 +144,14 @@ export function buildInstallGraph(
       if (at === undefined) break;
       const r = reachOf(at);
       if (at !== start) r.parents.add(root);
-      offerPath(r, depth.get(at) ?? 1, () => pathFrom(at, prev));
+      const d = depth.get(at) ?? 1;
+      offerPath(r, d, () => pathFrom(at, prev, root, d));
       for (const next of edgesOf(at)) {
         if (++steps > maxSteps) {
           for (const v of reach.values()) {
             v.parents.clear();
             v.paths.length = 0;
+            v.truncated = true;
           }
           return { direct, reach, complete: false };
         }
@@ -154,10 +166,17 @@ export function buildInstallGraph(
 }
 
 /** Names along the walk from its start to `at`, rebuilt from predecessor pointers. */
-function pathFrom(at: string, prev: Map<string, string | null>): string[] {
-  const names: string[] = [];
-  for (let cur: string | null | undefined = at; cur; cur = prev.get(cur)) names.push(nameAt(cur));
-  return names.reverse();
+/**
+ * Names along the walk from its start to `at`, rebuilt from predecessor pointers. Never walks more than
+ * MAX_PATH_SEGMENTS pointers: a deeper path keeps its root, PATH_ELLIPSIS, and its last segments, so memory and
+ * work per path are bounded however deep the chain.
+ */
+function pathFrom(at: string, prev: Map<string, string | null>, root: string, depth: number): string[] {
+  const keep = depth <= MAX_PATH_SEGMENTS ? depth : MAX_PATH_SEGMENTS - 2;
+  const tail: string[] = [];
+  for (let cur: string | null | undefined = at; cur && tail.length < keep; cur = prev.get(cur)) tail.push(nameAt(cur));
+  tail.reverse();
+  return depth <= MAX_PATH_SEGMENTS ? tail : [root, PATH_ELLIPSIS, ...tail];
 }
 
 /**
@@ -167,8 +186,16 @@ function pathFrom(at: string, prev: Map<string, string | null>): string[] {
  */
 function offerPath(r: Reach, length: number, build: () => string[]): void {
   const worst = r.paths[r.paths.length - 1];
-  if (r.paths.length >= PATHS_PER_LOCATION && worst !== undefined && length >= worst.length) return;
-  r.paths.push(build());
-  r.paths.sort((a, b) => a.length - b.length || a.join('/').localeCompare(b.join('/')));
+  // Compare by true depth, not stored length: abbreviated paths are all MAX_PATH_SEGMENTS long.
+  if (r.paths.length >= PATHS_PER_LOCATION && worst !== undefined && length >= depthOf(worst)) return;
+  const path = build();
+  if (path.includes(PATH_ELLIPSIS)) r.truncated = true;
+  r.paths.push(path);
+  r.paths.sort((a, b) => depthOf(a) - depthOf(b) || a.join('/').localeCompare(b.join('/')));
   if (r.paths.length > PATHS_PER_LOCATION) r.paths.length = PATHS_PER_LOCATION;
+}
+
+/** True depth isn't recoverable from an abbreviated path; treat it as at least as deep as the cap. */
+function depthOf(path: string[]): number {
+  return path.includes(PATH_ELLIPSIS) ? Number.MAX_SAFE_INTEGER : path.length;
 }

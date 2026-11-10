@@ -29,6 +29,7 @@ interface FindingJson {
   isDirect: boolean;
   directParents: string[];
   installPaths: string[][];
+  contextTruncated?: boolean;
   advisoryId: string;
   aliases: string[];
   severity: Severity;
@@ -386,6 +387,11 @@ function actionCard(a: ActionJson, findings: FindingJson[]): HTMLElement {
     );
     const paths = f?.installPaths ?? [];
     if (paths.length > 0) block.append(el('div', `Install path: ${paths.map((p) => p.join(' › ')).join('  |  ')}`, 'muted'));
+    if (f?.contextTruncated === true) {
+      block.append(
+        el('div', 'Dependency context truncated: the install graph was too large or deep to list every parent and path. The finding itself is complete.', 'muted'),
+      );
+    }
     const list = el('ul');
     for (const adv of v.advisories) {
       const li = el('li');
@@ -455,7 +461,7 @@ function findingsSection(report: ReportJson): HTMLElement {
     const adv = el('td');
     adv.append(link(f.advisoryId, `https://osv.dev/vulnerability/${encodeURIComponent(f.advisoryId)}`));
     if (f.title) adv.append(el('div', f.title, 'muted'));
-    const dep = `${f.isDirect ? 'direct' : `via ${f.directParents.join(', ') || '?'}`}, ${f.scope}`;
+    const dep = `${f.isDirect ? 'direct' : `via ${f.directParents.join(', ') || '?'}`}, ${f.scope}${f.contextTruncated === true ? ' (context truncated)' : ''}`;
     const candidate = f.fixStatus === 'candidate' ? (f.candidateVersion ?? '') : f.fixStatus === 'no_fix' ? 'none published' : 'see advisory';
     row.append(sev, adv, el('td', dep), el('td', candidate));
     table.tBodies[0]?.append(row);

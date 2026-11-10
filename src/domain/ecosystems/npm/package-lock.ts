@@ -4,7 +4,7 @@
  */
 import { MAX_INSTALL_PATHS, type LockedPackage, type ParseLockfileResult, type Scope, type UncheckablePackage } from '../../lockfile.ts';
 import type { LockfileFormat } from '../types.ts';
-import { buildInstallGraph } from './graph.ts';
+import { buildInstallGraph, PATH_ELLIPSIS } from './graph.ts';
 import { isValidNpmName } from './name.ts';
 import { workspaceMatcher } from './workspaces.ts';
 
@@ -107,7 +107,7 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
     const key = `${name}@${ver}`;
     let seen = byKey.get(key);
     if (!seen) {
-      seen = { name, installedAs: [], directAs: [], version: ver, scope, isDirect, directParents: [], installPaths: [], parentSet: new Set() };
+      seen = { name, installedAs: [], directAs: [], contextTruncated: false, version: ver, scope, isDirect, directParents: [], installPaths: [], parentSet: new Set() };
       byKey.set(key, seen);
     } else {
       if (SCOPE_RANK[scope] > SCOPE_RANK[seen.scope]) seen.scope = scope;
@@ -116,7 +116,9 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
     if (!seen.installedAs.includes(folderName)) seen.installedAs.push(folderName);
     if (isDirect && !seen.directAs.includes(folderName)) seen.directAs.push(folderName);
     for (const p of reach?.parents ?? []) if (isValidNpmName(p)) seen.parentSet.add(p);
-    seen.installPaths.push(...(reach?.paths ?? []).filter((p) => p.every(isValidNpmName)));
+    seen.installPaths.push(...(reach?.paths ?? []).filter((p) => p.every((n) => n === PATH_ELLIPSIS || isValidNpmName(n))));
+    // Without a complete walk, a non-direct package's parents may be missing: say so rather than show none.
+    if (reach?.truncated === true || (!graph.complete && !isDirect)) seen.contextTruncated = true;
   }
 
   const packagesOut: LockedPackage[] = [...byKey.values()].map(({ parentSet, ...p }) => ({

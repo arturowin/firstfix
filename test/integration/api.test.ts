@@ -191,6 +191,7 @@ describe('HTTP API', () => {
             isDirect: true,
             directParents: [],
             installPaths: [['lodash']],
+            contextTruncated: false,
             candidateVersion: '4.17.21',
             fixStatus: 'candidate',
             advisory: {

@@ -46,6 +46,7 @@ export interface FindingInput {
   isDirect: boolean;
   directParents: string[];
   installPaths: string[][];
+  contextTruncated: boolean;
   advisory: Advisory;
   candidateVersion: string | null;
   fixStatus: FixStatus;
@@ -61,6 +62,7 @@ export interface FindingView {
   isDirect: boolean;
   directParents: string[];
   installPaths: string[][];
+  contextTruncated: boolean;
   advisoryId: string;
   aliases: string[];
   severity: Severity;

@@ -249,6 +249,25 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
     expect(JSON.stringify(report?.findings)).not.toContain('curl');
   });
 
+  it('a finding deep in a long chain is kept; its truncated dependency context is stored and explicit', async () => {
+    const id = await newScan();
+    const N = 60;
+    const chain: Record<string, unknown> = { '': { dependencies: { c0: '1' } } };
+    for (let i = 0; i < N; i++) {
+      chain[`node_modules/c${String(i)}`] = {
+        version: '1.0.0',
+        resolved: `https://registry.npmjs.org/c${String(i)}/-/c${String(i)}-1.0.0.tgz`,
+        dependencies: i + 1 < N ? { [`c${String(i + 1)}`]: '1' } : {},
+      };
+    }
+    const lock = JSON.stringify({ lockfileVersion: 3, packages: chain });
+    const pipeline = new ScanPipeline({ scans, source: source(lock), vulns: vulns(new Map([[`npm:c${String(N - 1)}@1.0.0`, [advisory('GHSA-deep')]]])) });
+    expect(await pipeline.run(id, signal())).toBe('completed');
+    const [finding] = (await scans.getReport(id))?.findings ?? [];
+    expect(finding).toMatchObject({ package: `c${String(N - 1)}`, advisoryId: 'GHSA-deep', contextTruncated: true, directParents: ['c0'] });
+    expect(finding?.installPaths[0]).toContain('…');
+  });
+
   it('zero dependencies → completed with nothing to check', async () => {
     const id = await newScan();
     const pipeline = new ScanPipeline({ scans, source: source(lockfile({})), vulns: vulns(new Map()) });
