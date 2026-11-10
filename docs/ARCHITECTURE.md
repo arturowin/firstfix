@@ -27,7 +27,7 @@ Two processes share one PostgreSQL database.
 
 ## Data model (sketch — refine in M1)
 ```
-scans(id uuid pk, job_id,    -- pg-boss job id, stored at submission (same tx)
+scans(id uuid pk,            -- also the pg-boss job id (send({ id })), same submission tx
       repo_owner, repo_name, repo_url_normalized, commit_sha null,
       status, stage null, attempt int default 0,
       total_deps int, checked_deps int, unsupported_deps int, failed_lookups int,
@@ -115,7 +115,7 @@ COMMIT;
   non-terminal. It does not check `attempt` (the attempt that died never finished).
 - **Sweeper (safety net for crashes/hangs):** pg-boss decides, time only narrows the search.
   It selects non-terminal scans whose `updated_at` is older than job expiry + margin, looks up each
-  scan's `job_id` in pg-boss (`findJobs(queue, { id })`), and fails the scan only if the job is finished
+  scan's id in pg-boss (`findJobs(queue, { id })`, job id = scan id), and fails the scan only if the job is finished
   (failed/completed/cancelled) or missing. pg-boss 12 has no archive table: jobs are deleted after
   `deleteAfterSeconds` (finished, default 7 days) or `retentionSeconds` (never started, default 14 days).
   With dead-lettering covering crashes, the sweeper is defence in depth (DLQ handler down, job deleted). A job that is still queued, retrying or active is left alone, so queue
@@ -130,7 +130,7 @@ Everything below is tested there unless marked as read from the source or as a p
   about that long. Without it, a crashed job only comes back after `expireInSeconds` (default 15 min).
   `work()` refreshes the heartbeat every `heartbeatSeconds / 2` while the handler runs, so a healthy
   attempt longer than `heartbeatSeconds` is not retried or run twice (tested with a 25 s handler, 10 s heartbeat).
-  Proposed: `heartbeatSeconds: 30`, `expireInSeconds: 300` (upper bound on one scan attempt).
+  Adopted in M1: `heartbeatSeconds: 30`, `expireInSeconds: 300` (upper bound on one scan attempt).
 - Missed heartbeat on the last attempt → job `failed` and dead-lettered, same as expiry.
 - `job.signal` is aborted when the job expires (tested) and, per the 12.38 source (`manager.js`
   `#processJobs`), when a heartbeat refresh finds the claim gone. Either way the attempt no longer owns the
@@ -139,9 +139,9 @@ Everything below is tested there unless marked as read from the source or as a p
   stale attempt (both tested). This fences pg-boss's job row only; our `scans.attempt` guard is still what
   fences scan rows.
 - Backoff: with `retryBackoff: true` the delay before retry n is about `retryDelay × 2^(n-1)` (with jitter),
-  capped by `retryDelayMax`. Proposed for scans: `retryLimit: 3`, `retryDelay: 5`, `retryBackoff: true`,
+  capped by `retryDelayMax`. Adopted for scans in M1: `retryLimit: 3`, `retryDelay: 5`, `retryBackoff: true`,
   `retryDelayMax: 60`.
-- `send` accepts a caller-chosen `id`, so the job id can be the scan id (one id to trace).
+- `send` accepts a caller-chosen `id`: the job id **is** the scan id (adopted in M1; one id to trace).
 
 ### Supported input
 - `package-lock.json` at repo root, `lockfileVersion` 2 or 3. Otherwise `unsupported` with reason

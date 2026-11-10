@@ -60,7 +60,7 @@ describe('migrate', () => {
   it('rejects an invalid status', async () => {
     await expect(
       pool.query(
-        `INSERT INTO scans (job_id, repo_owner, repo_name, repo_url_normalized, status)
+        `INSERT INTO scans (id, repo_owner, repo_name, repo_url_normalized, status)
          VALUES (gen_random_uuid(), 'o', 'r', 'https://github.com/o/r', 'done')`,
       ),
     ).rejects.toThrow(/check constraint/);
@@ -69,7 +69,7 @@ describe('migrate', () => {
   it('allows a stage only while running', async () => {
     const insert = (status: string) =>
       pool.query(
-        `INSERT INTO scans (job_id, repo_owner, repo_name, repo_url_normalized, status, stage)
+        `INSERT INTO scans (id, repo_owner, repo_name, repo_url_normalized, status, stage)
          VALUES (gen_random_uuid(), 'o', 'r', 'https://github.com/o/r', $1, 'scanning')`,
         [status],
       );
@@ -80,7 +80,7 @@ describe('migrate', () => {
 
   it('maintains updated_at on every update without the statement setting it', async () => {
     const { rows } = await pool.query<{ id: string; updated_at: Date }>(
-      `INSERT INTO scans (job_id, repo_owner, repo_name, repo_url_normalized, updated_at)
+      `INSERT INTO scans (id, repo_owner, repo_name, repo_url_normalized, updated_at)
        VALUES (gen_random_uuid(), 'o', 'r', 'https://github.com/o/r', now() - interval '1 hour')
        RETURNING id, updated_at`,
     );
@@ -109,7 +109,7 @@ describe('scans status bookkeeping (trigger)', () => {
 
   async function runningScan(): Promise<string> {
     const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO scans (job_id, repo_owner, repo_name, repo_url_normalized, status, stage, attempt)
+      `INSERT INTO scans (id, repo_owner, repo_name, repo_url_normalized, status, stage, attempt)
        VALUES (gen_random_uuid(), 'o', 'r', 'https://github.com/o/r', 'running', 'scanning', 1)
        RETURNING id`,
     );

@@ -18,7 +18,7 @@ Rule: one milestone at a time. A milestone is done only when its gate passes and
 ## M1 · Vertical slice
 - [ ] API and worker run as separate processes against Postgres
 - [ ] `POST /scans`: malformed or non-github.com URL → 400 with clear message; else 202 `{ scanId }`
-- [ ] Scan row + pg-boss job in one transaction; `job_id` stored on the scan
+- [ ] Scan row + pg-boss job in one transaction; job id = scan id
 - [ ] Idempotency-Key: same key + same request → same scan; same key + different request → 409
 - [ ] Worker: resolve commit SHA, read `package-lock.json` at that SHA via raw.githubusercontent.com, query OSV, save findings, mark completed
 - [ ] GitHub errors: 404 → "not found or private"; rate-limit 403/429 → transient; optional GITHUB_TOKEN

@@ -2,8 +2,7 @@
 -- pg-boss manages its own schema; it is not part of these migrations.
 
 CREATE TABLE scans (
-  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  job_id              uuid NOT NULL,          -- pg-boss job id, written in the submission transaction
+  id                  uuid PRIMARY KEY,       -- also the pg-boss job id (send({ id })), set in the submission tx
   repo_owner          text NOT NULL,
   repo_name           text NOT NULL,
   repo_url_normalized text NOT NULL,
@@ -71,7 +70,6 @@ CREATE TRIGGER scans_before_update
   BEFORE UPDATE ON scans
   FOR EACH ROW EXECUTE FUNCTION scans_before_update();
 
-CREATE UNIQUE INDEX scans_job_id_key ON scans (job_id);
 -- Sweeper: non-terminal scans not updated recently.
 CREATE INDEX scans_in_progress_idx ON scans (updated_at)
   WHERE status IN ('queued', 'running', 'retrying');
