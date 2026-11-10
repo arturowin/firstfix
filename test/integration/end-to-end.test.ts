@@ -102,7 +102,14 @@ describe('end to end: submit → worker → report', () => {
       isDirect: true,
       scope: 'runtime',
     });
-    expect(byPackage['lodash']?.[0]).toMatchObject({ severity: 'medium', installedVersion: '4.17.20' });
+    expect(byPackage['lodash']?.[0]).toMatchObject({
+      severity: 'medium',
+      installedVersion: '4.17.20',
+      candidateVersion: '4.17.21',
+      fixStatus: 'candidate',
+    });
+    expect(byPackage['request']?.[0]).toMatchObject({ candidateVersion: null, fixStatus: 'no_fix' });
+    expect(byPackage['flatmap-stream']?.every((f) => f.isMalicious && f.fixStatus === 'no_fix')).toBe(true);
     expect(report?.unchecked).toEqual([{ ecosystem: 'npm', package: 'slash', version: '5.1.0', reason: 'unsupported_source' }]);
   });
 

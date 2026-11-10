@@ -1,4 +1,5 @@
 import type { Advisory, Severity } from '../domain/advisory.ts';
+import type { FixStatus } from '../domain/candidate.ts';
 import type { EcosystemId } from '../domain/ecosystems/types.ts';
 import type { Scope } from '../domain/lockfile.ts';
 
@@ -40,6 +41,7 @@ export interface FindingInput {
   installPaths: string[][];
   advisory: Advisory;
   candidateVersion: string | null;
+  fixStatus: FixStatus;
 }
 
 export interface FindingView {
@@ -55,6 +57,7 @@ export interface FindingView {
   isMalicious: boolean;
   title: string | null;
   candidateVersion: string | null;
+  fixStatus: FixStatus;
   references: { type: string; url: string }[];
 }
 

@@ -39,7 +39,8 @@ describe('PostgresScanRepository: attempt ownership', () => {
         isDirect: true,
         directParents: [],
         installPaths: [['lodash']],
-        candidateVersion: null,
+        candidateVersion: '4.17.21',
+        fixStatus: 'candidate',
         advisory: {
           id: 'GHSA-29mw-wpgm-hmr9',
           aliases: ['CVE-2020-28500'],
@@ -105,7 +106,8 @@ describe('PostgresScanRepository: attempt ownership', () => {
         severity: 'medium',
         isMalicious: false,
         title: 'ReDoS in lodash',
-        candidateVersion: null,
+        candidateVersion: '4.17.21',
+        fixStatus: 'candidate',
         references: [{ type: 'ADVISORY', url: 'https://example.com' }],
       },
     ]);

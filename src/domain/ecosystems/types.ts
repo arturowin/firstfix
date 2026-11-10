@@ -1,3 +1,4 @@
+import type { AffectedRange } from '../advisory.ts';
 import type { ParseLockfileResult } from '../lockfile.ts';
 
 /**
@@ -22,10 +23,21 @@ export interface RemediationHints {
   ciChecks: readonly string[];
 }
 
+/** How an ecosystem orders versions. Without one, findings get no candidate version and no major-jump flag. */
+export interface VersionScheme {
+  isValid(version: string): boolean;
+  /** Negative, zero or positive like Array.sort; only called with valid versions. */
+  compare(a: string, b: string): number;
+  /** Moving from `from` to `to` leaves the range the ecosystem treats as compatible (npm: outside `^from`). */
+  isMajorJump(from: string, to: string): boolean;
+  inRange(version: string, range: AffectedRange): boolean;
+}
+
 export interface Ecosystem {
   id: EcosystemId;
   /** Human label, e.g. "npm". */
   label: string;
+  versionScheme: VersionScheme | null;
   hints: RemediationHints;
 }
 

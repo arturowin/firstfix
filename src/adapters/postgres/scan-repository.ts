@@ -12,6 +12,7 @@ import type {
   UncheckedView,
 } from '../../ports/scan-repository.ts';
 import type { Severity } from '../../domain/advisory.ts';
+import type { FixStatus } from '../../domain/candidate.ts';
 import type { Scope } from '../../domain/lockfile.ts';
 import { inTransactionOrRollback, Rollback } from './pool.ts';
 
@@ -98,10 +99,11 @@ export class PostgresScanRepository implements ScanRepository {
       is_malicious: boolean;
       title: string | null;
       candidate_version: string | null;
+      fix_status: FixStatus;
       references: { type: string; url: string }[];
     }>(
       `SELECT ecosystem, package, installed_version, scope, is_direct, direct_parents, advisory_id, aliases, severity,
-              is_malicious, title, candidate_version, "references"
+              is_malicious, title, candidate_version, fix_status, "references"
          FROM findings WHERE scan_id = $1 ORDER BY ecosystem, package, installed_version, advisory_id`,
       [scanId],
     );
@@ -126,6 +128,7 @@ export class PostgresScanRepository implements ScanRepository {
           isMalicious: f.is_malicious,
           title: f.title,
           candidateVersion: f.candidate_version,
+          fixStatus: f.fix_status,
           references: f.references,
         }),
       ),
@@ -185,15 +188,15 @@ export class PostgresScanRepository implements ScanRepository {
         await client.query(
           `INSERT INTO findings (scan_id, ecosystem, package, installed_version, scope, is_direct, direct_parents, install_paths,
                                  advisory_id, aliases, severity, is_malicious, title, affected_ranges,
-                                 candidate_version, "references")
+                                 candidate_version, fix_status, "references")
            SELECT $1, f.ecosystem, f.package, f.installed_version, f.scope, f.is_direct,
                   ARRAY(SELECT jsonb_array_elements_text(f.direct_parents)), f.install_paths,
                   f.advisory_id, ARRAY(SELECT jsonb_array_elements_text(f.aliases)), f.severity, f.is_malicious,
-                  f.title, f.affected_ranges, f.candidate_version, f."references"
+                  f.title, f.affected_ranges, f.candidate_version, f.fix_status, f."references"
              FROM jsonb_to_recordset($2::jsonb) AS f(
                   ecosystem text, package text, installed_version text, scope text, is_direct boolean, direct_parents jsonb,
                   install_paths jsonb, advisory_id text, aliases jsonb, severity text, is_malicious boolean,
-                  title text, affected_ranges jsonb, candidate_version text, "references" jsonb)`,
+                  title text, affected_ranges jsonb, candidate_version text, fix_status text, "references" jsonb)`,
           [
             claim.scanId,
             JSON.stringify(
@@ -212,6 +215,7 @@ export class PostgresScanRepository implements ScanRepository {
                 title: f.advisory.title,
                 affected_ranges: f.advisory.affectedRanges,
                 candidate_version: f.candidateVersion,
+                fix_status: f.fixStatus,
                 references: f.advisory.references,
               })),
             ),

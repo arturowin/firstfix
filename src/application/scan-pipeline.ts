@@ -1,3 +1,4 @@
+import { selectCandidate } from '../domain/candidate.ts';
 import { defaultRegistry, missingLockfileMessage } from '../domain/ecosystems/registry.ts';
 import type { EcosystemRegistry, LockfileFormat } from '../domain/ecosystems/types.ts';
 import { PermanentError } from '../ports/errors.ts';
@@ -63,6 +64,7 @@ export class ScanPipeline {
     if (parsed.kind === 'unsupported') throw new PermanentError('unsupported_lockfile', parsed.reason, 'unsupported');
 
     const { packages, uncheckable } = parsed;
+    const scheme = this.registry.ecosystems.get(ecosystem)?.versionScheme ?? null;
     const totalDeps = packages.length + uncheckable.length;
     const moving = await this.scans.recordProgress(claim, {
       stage: 'scanning',
@@ -80,17 +82,21 @@ export class ScanPipeline {
     }
 
     const findings: FindingInput[] = packages.flatMap((p) =>
-      (advisories.get(packageKey({ ecosystem, ...p })) ?? []).map((advisory) => ({
-        ecosystem,
-        package: p.name,
-        installedVersion: p.version,
-        scope: p.scope,
-        isDirect: p.isDirect,
-        directParents: [], // M2: dependency-graph walk
-        installPaths: [], // M2
-        advisory,
-        candidateVersion: null, // M2: candidate selection
-      })),
+      (advisories.get(packageKey({ ecosystem, ...p })) ?? []).map((advisory): FindingInput => {
+        const candidate = selectCandidate(p.version, advisory.affectedRanges, scheme);
+        return {
+          ecosystem,
+          package: p.name,
+          installedVersion: p.version,
+          scope: p.scope,
+          isDirect: p.isDirect,
+          directParents: [], // M2: dependency-graph walk
+          installPaths: [], // M2
+          advisory,
+          candidateVersion: candidate.version,
+          fixStatus: candidate.status,
+        };
+      }),
     );
 
     const saved = await this.scans.complete(claim, {

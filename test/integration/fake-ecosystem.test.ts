@@ -39,6 +39,7 @@ const fakeFormat: LockfileFormat = {
 const fake: Ecosystem = {
   id: ECOSYSTEM,
   label: 'Fakeco',
+  versionScheme: null, // no scheme: findings still reported, without candidates
   hints: { upgradeCommand: (p, v) => `fake add ${p}==${v}`, ciChecks: ['fake audit'] },
 };
 
@@ -120,6 +121,8 @@ describe('a test-only ecosystem through the real pipeline', () => {
     expect(report?.findings.map((f) => [f.ecosystem, f.package, f.installedVersion, f.advisoryId, f.severity])).toEqual([
       [ECOSYSTEM, 'widget', '1.2.0', 'FAKE-2026-1', 'high'],
     ]);
+    // No version scheme for this ecosystem: no candidate is guessed.
+    expect(report?.findings[0]).toMatchObject({ candidateVersion: null, fixStatus: 'unknown' });
     const ranges = await env.pool.query<{ affected_ranges: unknown }>('SELECT affected_ranges FROM findings WHERE scan_id = $1', [id]);
     // Only the Fakeco entry of the advisory applies, not the npm package of the same name.
     expect(ranges.rows[0]?.affected_ranges).toEqual([{ kind: 'range', introduced: '0', fixed: '1.3.0', lastAffected: null }]);
