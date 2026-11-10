@@ -144,18 +144,35 @@ form.addEventListener('submit', (event) => {
   void submit(input.value.trim());
 });
 
-/** Disables every submit control (the form button and any "Scan again") while a request is in flight. */
-function setSubmitting(on: boolean): void {
-  button.disabled = on;
-  for (const b of document.querySelectorAll<HTMLButtonElement>('button.scan-again')) b.disabled = on;
+const LABELS: Record<SubmissionFlow['phase'], { main: string; again: string }> = {
+  idle: { main: 'Scan repository', again: 'Scan again' },
+  submitting: { main: 'Submitting…', again: 'Submitting…' },
+  scanning: { main: 'Scanning…', again: 'Scanning…' },
+};
+
+/**
+ * Every submit control (the form button and any "Scan again") reflects one shared state: disabled while
+ * submitting or while the followed scan is still running. Called whenever that state may have changed.
+ */
+function syncButtons(): void {
+  const phase = submissions.phase;
+  const { main, again } = LABELS[phase];
+  button.disabled = phase !== 'idle';
+  button.textContent = main;
+  for (const b of document.querySelectorAll<HTMLButtonElement>('button.scan-again')) {
+    b.disabled = phase !== 'idle';
+    b.textContent = again;
+  }
 }
 
+/** The one entry point for starting a scan (button click, Enter in the form, "Scan again"). */
 async function submit(repoUrl: string): Promise<void> {
-  if (submissions.busy) return;
+  if (submissions.busy) return; // shared guard: rapid clicks and Enter can't start a second scan
   formError.textContent = '';
-  setSubmitting(true);
-  const outcome = await submissions.submit(repoUrl);
-  setSubmitting(false);
+  const pending = submissions.submit(repoUrl);
+  syncButtons(); // disabled at once, before the request returns
+  const outcome = await pending;
+  syncButtons();
   if (outcome.kind === 'accepted') {
     history.pushState(null, '', `/scans/${outcome.scanId}`);
     void follow(outcome.scanId);
@@ -164,10 +181,19 @@ async function submit(repoUrl: string): Promise<void> {
   }
 }
 
+/** Ends following `scanId` (terminal or not found); a stale scan id changes nothing. */
+function settle(scanId: string): void {
+  submissions.settle(scanId);
+  syncButtons();
+}
+
 let following: string | null = null;
 
 async function follow(scanId: string): Promise<void> {
   following = scanId;
+  // Locked until this scan settles, also when it was opened by reloading its page.
+  submissions.follow(scanId);
+  syncButtons();
   document.body.classList.add('has-scan'); // compact hero while a scan is on screen
   for (;;) {
     if (following !== scanId) return; // user started another scan
@@ -176,21 +202,22 @@ async function follow(scanId: string): Promise<void> {
       const res = await api(`/scans/${scanId}`);
       if (following !== scanId) return;
       if (res.status === 404) {
+        settle(scanId);
         renderMessage('Scan not found.');
         return;
       }
       if (res.status !== 200) {
-        renderMessage(`The server answered ${String(res.status)} while checking progress; retrying…`);
-        await sleep(3000);
+        await pollProblem(scanId, `The server answered ${String(res.status)} while checking progress.`);
         continue;
       }
       scan = res.body as ScanJson;
     } catch {
-      renderMessage('Lost connection to the server; retrying…');
-      await sleep(3000);
+      if (following !== scanId) return;
+      await pollProblem(scanId, 'Lost connection to the server.');
       continue;
     }
     if (TERMINAL.has(scan.status)) {
+      settle(scanId); // terminal: starting another scan is allowed again
       if (input.value === '') input.value = scan.repo.url;
       if (scan.status === 'completed') {
         await showReport(scanId);
@@ -230,6 +257,28 @@ async function showReport(scanId: string): Promise<void> {
     renderMessage(`The scan finished, but loading its report failed (${problem}). Retrying…`);
     await sleep(Math.min(1500 * attempt, 10_000));
   }
+}
+
+/**
+ * A temporary error while checking progress: the scan keeps running and the buttons stay locked. The status is
+ * checked again automatically, or right away with "Check again"; nothing is resubmitted.
+ */
+async function pollProblem(scanId: string, message: string): Promise<void> {
+  let wake: () => void = () => undefined;
+  const box = el('div', undefined, 'card');
+  const retry = el('button', 'Check again', 'secondary');
+  retry.type = 'button';
+  retry.addEventListener('click', () => {
+    wake();
+  });
+  const row = el('div', undefined, 'row');
+  row.append(retry);
+  box.append(el('div', `${message} The scan is still running; checking its status again shortly.`, 'muted'), row);
+  if (following === scanId) result.replaceChildren(box);
+  await new Promise<void>((resolve) => {
+    wake = resolve;
+    setTimeout(resolve, 3000);
+  });
 }
 
 function sleep(ms: number): Promise<void> {
@@ -552,7 +601,7 @@ function promptSection(report: ReportJson): HTMLElement {
 }
 
 function scanAgainButton(scan: ScanJson): HTMLButtonElement {
-  const again = el('button', 'Scan again', 'secondary scan-again');
+  const again = el('button', LABELS[submissions.phase].again, 'secondary scan-again');
   again.type = 'button';
   again.disabled = submissions.busy;
   again.addEventListener('click', () => {
@@ -640,6 +689,8 @@ function route(): void {
     void follow(match[1]);
   } else {
     following = null;
+    submissions.unfollow(); // not following a scan any more: a new one may be started
+    syncButtons();
     document.body.classList.remove('has-scan');
     result.replaceChildren();
   }

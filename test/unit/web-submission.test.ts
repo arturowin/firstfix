@@ -30,22 +30,29 @@ function fakeServer() {
   return { post, newKey: () => `key-${String(++k)}`, keysSent, scansByKey, control };
 }
 
-describe('browser submission flow (Scan again idempotency, review finding)', () => {
+const accepted = (o: Awaited<ReturnType<SubmissionFlow['submit']>>): string => {
+  if (o.kind !== 'accepted') throw new Error(`expected accepted, got ${o.kind}`);
+  return o.scanId;
+};
+
+describe('browser submission flow: idempotency keys', () => {
   it('a rescan whose response is lost is retried with the same key; the server returns the scan it created', async () => {
     const s = fakeServer();
     const flow = new SubmissionFlow(s.post, s.newKey);
     const url = 'https://github.com/o/r';
 
-    expect(await flow.submit(url)).toMatchObject({ kind: 'accepted' }); // the first scan
+    flow.settle(accepted(await flow.submit(url))); // the first scan runs to completion
     s.control.lose = true;
     expect(await flow.submit(url)).toEqual({ kind: 'error', message: 'Could not reach the server. Try again.', retryable: true });
-    const retry = await flow.submit(url); // the user clicks "Scan again" again
-    expect(retry).toEqual({ kind: 'accepted', scanId: 'scan-2-https://github.com/o/r' });
+    expect(flow.phase).toBe('idle'); // no scan id received: the buttons come back for the retry
+    const retry = accepted(await flow.submit(url)); // the user clicks "Scan again" again
+    expect(retry).toBe('scan-2-https://github.com/o/r');
     expect(s.keysSent).toEqual(['key-1', 'key-2', 'key-2']);
     expect(s.scansByKey.size).toBe(2); // one scan per intent, no duplicate
 
-    // A deliberate rescan after that success is a new intent: new key, new scan.
-    expect(await flow.submit(url)).toEqual({ kind: 'accepted', scanId: 'scan-3-https://github.com/o/r' });
+    // A deliberate rescan after that scan settles is a new intent: new key, new scan.
+    flow.settle(retry);
+    expect(accepted(await flow.submit(url))).toBe('scan-3-https://github.com/o/r');
     expect(s.keysSent.at(-1)).toBe('key-3');
   });
 
@@ -54,11 +61,26 @@ describe('browser submission flow (Scan again idempotency, review finding)', () 
     const flow = new SubmissionFlow(s.post, s.newKey);
     s.control.status = status;
     expect(await flow.submit('https://github.com/o/r')).toMatchObject({ kind: 'error', retryable: true });
-    expect(await flow.submit('https://github.com/o/r')).toMatchObject({ kind: 'accepted' });
+    expect(flow.busy).toBe(false);
+    accepted(await flow.submit('https://github.com/o/r'));
     expect(s.keysSent).toEqual(['key-1', 'key-1']);
   });
 
-  it('clicks while a request is in flight send nothing', async () => {
+  it('the regular form keeps its behaviour: same repo after a failure reuses the key, another repo gets a new one, a 4xx starts fresh', async () => {
+    const s = fakeServer();
+    const flow = new SubmissionFlow(s.post, s.newKey);
+    s.control.lose = true;
+    await flow.submit('https://github.com/o/a');
+    flow.settle(accepted(await flow.submit('https://github.com/o/b'))); // changed their mind: another repository
+    s.control.status = 400;
+    expect(await flow.submit('https://github.com/o/c')).toMatchObject({ kind: 'error', retryable: false, message: 'status 400' });
+    await flow.submit('https://github.com/o/c'); // fixed input: a new attempt, new key
+    expect(s.keysSent).toEqual(['key-1', 'key-2', 'key-3', 'key-4']);
+  });
+});
+
+describe('browser submission flow: one shared lock until the scan finishes (review finding)', () => {
+  it('locked from the click until the followed scan settles; no second scan can be queued meanwhile', async () => {
     const s = fakeServer();
     let release: (r: PostResponse) => void = () => undefined;
     let calls = 0;
@@ -70,24 +92,47 @@ describe('browser submission flow (Scan again idempotency, review finding)', () 
       s.newKey,
     );
     const first = flow.submit('https://github.com/o/r');
-    expect(flow.busy).toBe(true);
+    expect(flow.phase).toBe('submitting'); // disabled immediately, before the answer
+    // rapid clicks, Enter in the form, "Scan again": all go through the same guard
     expect(await flow.submit('https://github.com/o/r')).toEqual({ kind: 'ignored' });
-    expect(await flow.submit('https://github.com/o/r')).toEqual({ kind: 'ignored' });
+    expect(await flow.submit('https://github.com/o/other')).toEqual({ kind: 'ignored' });
+
     release({ status: 202, body: { scanId: 's1' } });
     expect(await first).toEqual({ kind: 'accepted', scanId: 's1' });
+    // The API accepted the job, but the scan is still running: still locked, now "scanning".
+    expect(flow.phase).toBe('scanning');
+    expect(await flow.submit('https://github.com/o/r')).toEqual({ kind: 'ignored' });
     expect(calls).toBe(1);
+
+    expect(flow.settle('s1')).toBe(true); // terminal: completed, failed or unsupported
+    expect(flow.phase).toBe('idle');
+  });
+
+  it('reloading an active scan’s page restores the lock until that scan settles', async () => {
+    const s = fakeServer();
+    const flow = new SubmissionFlow(s.post, s.newKey); // a fresh page: nothing submitted from it
+    flow.follow('s-running');
+    expect(flow.phase).toBe('scanning');
+    expect(await flow.submit('https://github.com/o/r')).toEqual({ kind: 'ignored' });
+    expect(s.keysSent).toEqual([]);
+    flow.settle('s-running');
     expect(flow.busy).toBe(false);
   });
 
-  it('the regular form keeps its behaviour: same repo after a failure reuses the key, another repo gets a new one, a 4xx starts fresh', async () => {
-    const s = fakeServer();
-    const flow = new SubmissionFlow(s.post, s.newKey);
-    s.control.lose = true;
-    await flow.submit('https://github.com/o/a');
-    await flow.submit('https://github.com/o/b'); // changed their mind: a different repository
-    s.control.status = 400;
-    expect(await flow.submit('https://github.com/o/c')).toMatchObject({ kind: 'error', retryable: false, message: 'status 400' });
-    await flow.submit('https://github.com/o/c'); // fixed input: a new attempt, new key
-    expect(s.keysSent).toEqual(['key-1', 'key-2', 'key-3', 'key-4']);
+  it('an outdated poll answer can’t unlock the buttons for a newer scan', () => {
+    const flow = new SubmissionFlow(fakeServer().post, () => 'k');
+    flow.follow('old');
+    flow.follow('new'); // e.g. the user navigated to another active scan
+    expect(flow.settle('old')).toBe(false); // the old poll's terminal answer arrives late
+    expect(flow.phase).toBe('scanning');
+    expect(flow.settle('new')).toBe(true);
+    expect(flow.phase).toBe('idle');
+  });
+
+  it('navigating away from a scan releases the lock', () => {
+    const flow = new SubmissionFlow(fakeServer().post, () => 'k');
+    flow.follow('s1');
+    flow.unfollow();
+    expect(flow.busy).toBe(false);
   });
 });
