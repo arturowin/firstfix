@@ -56,24 +56,31 @@ export class OsvVulnDatabase implements VulnDatabase {
       }
     });
 
-    const result: LookupResult = { advisories: new Map(), failed: [] };
+    const result: LookupResult = { advisories: new Map(), failed: [], incomplete: [] };
     for (const pkg of packages) {
       const key = packageKey(pkg);
-      const ids = idsByPackage.get(key) ?? [];
-      if (failed.has(key) || ids.some((id) => failedIds.has(id))) {
+      if (failed.has(key)) {
         result.failed.push(pkg);
         continue;
       }
-      if (ids.length === 0) continue;
-      try {
-        result.advisories.set(
-          key,
-          ids.map((id) => toAdvisory(details.get(id) ?? { id }, pkg)),
-        );
-      } catch {
-        // Validated records shouldn't fail to translate; if one does, only this package is affected.
-        result.failed.push(pkg);
+      // Advisories whose details arrived are kept even if another one's didn't: a confirmed finding (say, a
+      // malware record) must never disappear because a different request failed.
+      const confirmed = [];
+      let missing = false;
+      for (const id of idsByPackage.get(key) ?? []) {
+        const detail = details.get(id);
+        if (failedIds.has(id) || !detail) {
+          missing = true;
+          continue;
+        }
+        try {
+          confirmed.push(toAdvisory(detail, pkg));
+        } catch {
+          missing = true; // validated records shouldn't fail to translate; if one does, only it is lost
+        }
       }
+      if (confirmed.length > 0) result.advisories.set(key, confirmed);
+      if (missing) result.incomplete.push(pkg);
     }
     return result;
   }

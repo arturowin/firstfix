@@ -26,10 +26,15 @@ export interface AdvisorySourceInfo {
  * test/contract/vuln-database.contract.ts. Adapters translate provider formats into domain/advisory.ts types.
  */
 export interface LookupResult {
-  /** Advisories per checked package; checked packages with none are absent. */
+  /** Advisories per package, including the ones confirmed for incomplete packages; packages with none are absent. */
   advisories: AdvisoryLookup;
-  /** Packages the source could not check (its calls failed even after a retry). Never in `advisories`. */
+  /** Packages the source could not check at all (its query failed even after a retry). Never in `advisories`. */
   failed: PackageRef[];
+  /**
+   * Packages whose advisory list is known but some advisory details couldn't be fetched: the confirmed ones are
+   * in `advisories` (never dropped), and the package counts as not fully checked.
+   */
+  incomplete: PackageRef[];
 }
 
 export interface VulnDatabase {

@@ -213,7 +213,7 @@ describe('OsvVulnDatabase', () => {
       }),
     );
     const r = await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([pkg('a')], signal());
-    expect(r).toEqual({ advisories: new Map(), failed: [pkg('a')] });
+    expect(r).toEqual({ advisories: new Map(), failed: [pkg('a')], incomplete: [] });
     expect(calls).toBe(2);
   });
 
@@ -224,7 +224,7 @@ describe('OsvVulnDatabase', () => {
         ++calls === 1 ? new HttpResponse(null, { status: 503 }) : HttpResponse.json({ results: [{}] }),
       ),
     );
-    expect(await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([pkg('a')], signal())).toEqual({ advisories: new Map(), failed: [] });
+    expect(await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([pkg('a')], signal())).toEqual({ advisories: new Map(), failed: [], incomplete: [] });
   });
 
   it('one failing chunk fails only its packages; other chunks are checked', async () => {
@@ -241,7 +241,7 @@ describe('OsvVulnDatabase', () => {
     expect([...r.advisories.keys()]).toEqual(['npm:a@1.0.0', 'npm:b@1.0.0']);
   });
 
-  it('a failing detail call fails every package citing that advisory, and only those', async () => {
+  it('a failing detail call makes the packages citing it incomplete; their other advisories are kept', async () => {
     serveVulnFixtures(new Map()); // registered first: msw tries the later BAD-1 handler before it
     server.use(
       http.post(`${OSV}/v1/querybatch`, () =>
@@ -250,8 +250,10 @@ describe('OsvVulnDatabase', () => {
       http.get(`${OSV}/v1/vulns/BAD-1`, () => new HttpResponse(null, { status: 500 })),
     );
     const r = await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([pkg('a'), pkg('b'), pkg('c')], signal());
-    expect(r.failed).toEqual([pkg('a'), pkg('b')]);
-    expect([...r.advisories.keys()]).toEqual(['npm:c@1.0.0']);
+    expect(r.failed).toEqual([]);
+    expect(r.incomplete).toEqual([pkg('a'), pkg('b')]);
+    expect([...r.advisories.keys()]).toEqual(['npm:b@1.0.0', 'npm:c@1.0.0']);
+    expect(r.advisories.get('npm:b@1.0.0')?.map((a) => a.id)).toEqual(['GHSA-29mw-wpgm-hmr9']);
   });
 
   it.each([
@@ -259,7 +261,7 @@ describe('OsvVulnDatabase', () => {
     ['ranges events are not a list', { id: 'BAD-1', affected: [{ package: { ecosystem: 'npm', name: 'a' }, ranges: [{ type: 'SEMVER', events: 'x' }] }] }],
     ['a different id than requested', { id: 'OTHER-1', affected: [] }],
     ['not an object', ['BAD-1']],
-  ])('a malformed advisory record (200 OK) — %s — fails only the packages citing it', async (_l, body) => {
+  ])('a malformed advisory record (200 OK) — %s — makes only the packages citing it incomplete', async (_l, body) => {
     let detailCalls = 0;
     serveVulnFixtures(new Map());
     server.use(
@@ -272,7 +274,8 @@ describe('OsvVulnDatabase', () => {
       }),
     );
     const r = await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([pkg('a'), pkg('lodash')], signal());
-    expect(r.failed).toEqual([pkg('a')]);
+    expect(r.failed).toEqual([]);
+    expect(r.incomplete).toEqual([pkg('a')]);
     expect([...r.advisories.keys()]).toEqual(['npm:lodash@1.0.0']);
     expect(detailCalls).toBe(2); // treated like a failed fetch: retried once
   });
@@ -285,11 +288,25 @@ describe('OsvVulnDatabase', () => {
   ])('a malformed batch entry — %s — fails only its package', async (_l, entry) => {
     server.use(http.post(`${OSV}/v1/querybatch`, () => HttpResponse.json({ results: [entry, {}] })));
     const r = await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([pkg('a'), pkg('b')], signal());
-    expect(r).toEqual({ advisories: new Map(), failed: [pkg('a')] });
+    expect(r).toEqual({ advisories: new Map(), failed: [pkg('a')], incomplete: [] });
+  });
+
+  it('a confirmed malware advisory is kept when another advisory for the same package fails (review reproduction)', async () => {
+    serveVulnFixtures(new Map());
+    server.use(
+      http.post(`${OSV}/v1/querybatch`, () =>
+        HttpResponse.json({ results: [{ vulns: [{ id: 'MAL-2025-20690' }, { id: 'GHSA-down-0000-0000' }] }] }),
+      ),
+      http.get(`${OSV}/v1/vulns/GHSA-down-0000-0000`, () => new HttpResponse(null, { status: 503 })),
+    );
+    const flatmap = { ecosystem: 'npm', name: 'flatmap-stream', version: '0.1.1' };
+    const r = await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([flatmap], signal());
+    expect(r.incomplete).toEqual([flatmap]);
+    expect(r.advisories.get('npm:flatmap-stream@0.1.1')).toEqual([expect.objectContaining({ id: 'MAL-2025-20690', isMalicious: true })]);
   });
 
   it('no packages → no calls', async () => {
-    expect(await new OsvVulnDatabase().lookup([], signal())).toEqual({ advisories: new Map(), failed: [] });
+    expect(await new OsvVulnDatabase().lookup([], signal())).toEqual({ advisories: new Map(), failed: [], incomplete: [] });
   });
 });
 

@@ -317,7 +317,7 @@ function summaryCard(report: ReportJson): HTMLElement {
     box.append(el('p', `Not checked, non-registry source: ${names(unsupported)}.`, 'muted'));
   }
   if (lookupFailed.length > 0) {
-    box.append(el('p', `Not checked, advisory lookup failed (temporary): ${names(lookupFailed)}. Scan again to check them.`, 'muted'));
+    box.append(el('p', `Not fully checked, advisory lookup failed (temporary): ${names(lookupFailed)}. Scan again to check them.`, 'muted'));
   }
   const invalid = report.unchecked.filter((u) => u.reason === 'invalid_name');
   if (invalid.length > 0) {
@@ -482,7 +482,8 @@ const UNCHECKED_GROUPS: { reason: Unchecked['reason']; title: string; advice: st
   {
     reason: 'lookup_failed',
     title: 'Advisory lookup failed',
-    advice: 'Registry packages the advisory source could not be asked about this time. This is usually temporary: scan again to check them.',
+    advice:
+      'Registry packages the advisory source could not be asked about, or only partly, this time. Any advisories that did arrive are listed with the findings. This is usually temporary: scan again to check them fully.',
   },
   {
     reason: 'invalid_name',
@@ -516,7 +517,7 @@ function uncheckedList(report: ReportJson): HTMLElement {
 function promptSection(report: ReportJson): HTMLElement {
   const section = el('section', undefined, 'card');
   section.append(el('h2', 'Hand off to a coding agent'));
-  section.append(el('p', 'Built from the findings above by a fixed template, so it holds only scan data, whether or not AI explanations are on. Read it before you paste it.', 'muted'));
+  section.append(el('p', 'Built from the findings above, so it holds only scan data. Read it before you paste it.', 'muted'));
   const preview = el('details');
   preview.append(el('summary', 'Preview prompt'), el('pre', report.agentPrompt ?? ''));
   const copy = el('button', 'Copy prompt', 'primary');

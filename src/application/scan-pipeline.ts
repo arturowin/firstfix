@@ -111,7 +111,7 @@ export class ScanPipeline {
     });
     if (!moving) return 'stale';
 
-    const { advisories, failed } = await this.vulns.lookup(
+    const { advisories, failed, incomplete } = await this.vulns.lookup(
       packages.map((p) => ({ ecosystem, name: p.name, version: p.version })),
       signal,
     );
@@ -123,15 +123,20 @@ export class ScanPipeline {
         `${this.vulns.source.name} could not be reached: none of the ${String(packages.length)} dependencies could be checked`,
       );
     }
+    const keyOf = (p: { name: string; version: string }) => packageKey({ ecosystem, ...p });
     const failedKeys = new Set(failed.map(packageKey));
-    const checked = packages.filter((p) => !failedKeys.has(packageKey({ ecosystem, ...p })));
-    const lookupFailed = packages.filter((p) => failedKeys.has(packageKey({ ecosystem, ...p })));
+    const incompleteKeys = new Set(incomplete.map(packageKey));
+    // Fully checked: every advisory for it was fetched. Incomplete packages keep their confirmed findings but
+    // count, like failed ones, as not fully checked (coverage partial, listed as lookup_failed).
+    const checked = packages.filter((p) => !failedKeys.has(keyOf(p)) && !incompleteKeys.has(keyOf(p)));
+    const lookupFailed = packages.filter((p) => failedKeys.has(keyOf(p)) || incompleteKeys.has(keyOf(p)));
+    const withFindings = packages.filter((p) => !failedKeys.has(keyOf(p)));
 
     if (!(await this.scans.recordProgress(claim, { stage: 'analyzing', counts: { checkedDeps: checked.length } }))) {
       return 'stale';
     }
 
-    const findings: FindingInput[] = checked.flatMap((p) =>
+    const findings: FindingInput[] = withFindings.flatMap((p) =>
       (advisories.get(packageKey({ ecosystem, ...p })) ?? []).map((advisory): FindingInput => {
         const candidate = selectCandidate(p.version, advisory.affectedRanges, scheme);
         return {

@@ -68,7 +68,7 @@ export function summaryLine({ counts, lockfilePath, actions }: SummaryInput): st
   const failedLookups = counts.failedLookups ?? 0;
   const partial =
     failedLookups > 0
-      ? ` ${plural(failedLookups, 'dependency', 'dependencies')} could not be checked because the advisory lookup failed; rescan for full coverage.`
+      ? ` ${plural(failedLookups, 'dependency', 'dependencies')} could not be fully checked because the advisory lookup failed; rescan for full coverage.`
       : '';
   if (actions.length === 0) return `No known vulnerabilities in ${checked}.${partial}`;
 

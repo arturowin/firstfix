@@ -97,19 +97,20 @@ export function vulnDatabaseContract(provider: string, harness: ContractHarness)
       expect(lookup.advisories.get('npm:lodash-rails@4.17.20')?.[0]?.affectedRanges ?? []).toEqual([]);
     });
 
-    it('an id the provider has no details for: that package is reported failed, not silently clean', async () => {
+    it('an id the provider has no details for: that package is reported incomplete, not silently clean', async () => {
       harness.serveUnknownId('GHSA-0000-0000-0000');
       const r = await harness.create().lookup([npm('a', '1.0.0')], signal());
-      expect(r).toEqual({ advisories: new Map(), failed: [npm('a', '1.0.0')] });
+      expect(r).toEqual({ advisories: new Map(), failed: [], incomplete: [npm('a', '1.0.0')] });
     });
 
-    it('partial: a package whose advisory details fail is failed; the others are still checked', async () => {
+    it('partial: a package whose advisory details fail is incomplete; the others are still checked', async () => {
       harness.serveRecorded({
         'npm:lodash@4.17.20': ['GHSA-29mw-wpgm-hmr9'],
         'npm:a@1.0.0': ['GHSA-0000-0000-0000'], // no details recorded
       });
       const r = await harness.create().lookup([npm('lodash', '4.17.20'), npm('a', '1.0.0'), npm('left-pad', '1.3.0')], signal());
-      expect(r.failed).toEqual([npm('a', '1.0.0')]);
+      expect(r.failed).toEqual([]);
+      expect(r.incomplete).toEqual([npm('a', '1.0.0')]);
       expect([...r.advisories.keys()]).toEqual(['npm:lodash@4.17.20']);
     });
 
@@ -117,7 +118,7 @@ export function vulnDatabaseContract(provider: string, harness: ContractHarness)
       harness.serveOutage(kind);
       const pkgs = [npm('a', '1.0.0'), npm('b', '2.0.0')];
       const r = await harness.create().lookup(pkgs, signal());
-      expect(r).toEqual({ advisories: new Map(), failed: pkgs });
+      expect(r).toEqual({ advisories: new Map(), failed: pkgs, incomplete: [] });
     });
 
     it('the caller’s abort rejects instead of reporting failures', async () => {
@@ -128,7 +129,7 @@ export function vulnDatabaseContract(provider: string, harness: ContractHarness)
     });
 
     it('no packages → empty result', async () => {
-      expect(await harness.create().lookup([], signal())).toEqual({ advisories: new Map(), failed: [] });
+      expect(await harness.create().lookup([], signal())).toEqual({ advisories: new Map(), failed: [], incomplete: [] });
     });
   });
 }

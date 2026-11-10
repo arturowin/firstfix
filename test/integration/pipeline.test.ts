@@ -34,14 +34,26 @@ const advisory = (id: string): Advisory => ({
   references: [],
 });
 
-/** A fake advisory source: `failedNames` are reported as not checked (partial coverage). */
-function vulns(result: AdvisoryLookup | Error, onLookup?: () => Promise<void>, failedNames: string[] = []): VulnDatabase {
+/**
+ * A fake advisory source: `failedNames` couldn't be checked at all; `incompleteNames` kept their advisories from
+ * `result` but some details were missing (both mean partial coverage).
+ */
+function vulns(
+  result: AdvisoryLookup | Error,
+  onLookup?: () => Promise<void>,
+  failedNames: string[] = [],
+  incompleteNames: string[] = [],
+): VulnDatabase {
   return {
     source: { name: 'Test advisories', url: 'https://advisories.test' },
     lookup: async (pkgs) => {
       await onLookup?.();
       if (result instanceof Error) throw result;
-      return { advisories: result, failed: pkgs.filter((p) => failedNames.includes(p.name)) };
+      return {
+        advisories: result,
+        failed: pkgs.filter((p) => failedNames.includes(p.name)),
+        incomplete: pkgs.filter((p) => incompleteNames.includes(p.name)),
+      };
     },
   };
 }
@@ -115,7 +127,7 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
         source: { name: 'Test advisories', url: 'https://advisories.test' },
         lookup: (pkgs) => {
           asked.push(...pkgs);
-          return Promise.resolve({ advisories: new Map([['npm:lodash@4.17.20', [advisory('GHSA-1')]]]), failed: [] });
+          return Promise.resolve({ advisories: new Map([['npm:lodash@4.17.20', [advisory('GHSA-1')]]]), failed: [], incomplete: [] });
         },
       },
     });
@@ -165,13 +177,27 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
       coverage: 'partial',
       counts: { totalDeps: 3, checkedDeps: 1, unsupportedDeps: 1, failedLookups: 1 },
       summaryLine: expect.stringMatching(
-        /in 1 of 3 dependencies checked\. 1 dependency could not be checked because the advisory lookup failed; rescan for full coverage\./,
+        /in 1 of 3 dependencies checked\. 1 dependency could not be fully checked because the advisory lookup failed; rescan for full coverage\./,
       ) as string,
     });
     expect(report?.unchecked).toEqual([
       { ecosystem: 'npm', package: 'b', version: '2.0.0', reason: 'lookup_failed' },
       { ecosystem: 'npm', package: 'g', version: '1.0.0', reason: 'unsupported_source' },
     ]);
+  });
+
+  it('an incomplete package keeps its confirmed findings and still counts as not fully checked', async () => {
+    const id = await newScan();
+    const pipeline = new ScanPipeline({
+      scans,
+      source: source(twoPackages),
+      vulns: vulns(new Map([['npm:a@1.0.0', [advisory('MAL-1')]]]), undefined, [], ['a']),
+    });
+    expect(await pipeline.run(id, signal())).toBe('completed');
+    const report = await scans.getReport(id);
+    expect(report?.findings.map((f) => [f.package, f.advisoryId, f.isMalicious])).toEqual([['a', 'MAL-1', true]]);
+    expect(report?.scan).toMatchObject({ coverage: 'partial', counts: { checkedDeps: 1, failedLookups: 1 } });
+    expect(report?.unchecked).toContainEqual({ ecosystem: 'npm', package: 'a', version: '1.0.0', reason: 'lookup_failed' });
   });
 
   it('every lookup fails → a transient error (retried; failed only once retries run out)', async () => {
@@ -212,7 +238,7 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
         source: { name: 'Test advisories', url: 'https://advisories.test' },
         lookup: (pkgs) => {
           asked.push(...pkgs.map((p) => p.name));
-          return Promise.resolve({ advisories: new Map([['npm:a@1.0.0', [advisory('GHSA-1')]]]), failed: [] });
+          return Promise.resolve({ advisories: new Map([['npm:a@1.0.0', [advisory('GHSA-1')]]]), failed: [], incomplete: [] });
         },
       },
     });

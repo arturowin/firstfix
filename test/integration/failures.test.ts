@@ -36,7 +36,7 @@ const source: RepoSource = {
 
 /** What the advisory source does on the next lookups; tests swap it. */
 type Behaviour = (pkgs: PackageRef[], signal: AbortSignal, call: number) => Promise<LookupResult>;
-const ok: Behaviour = () => Promise.resolve({ advisories: new Map(), failed: [] });
+const ok: Behaviour = () => Promise.resolve({ advisories: new Map(), failed: [], incomplete: [] });
 const down: Behaviour = () => Promise.reject(new TransientError('osv_unavailable', 'OSV answered 503'));
 /** Hangs until the attempt's signal aborts (a scan stuck mid-lookup). */
 const hang: Behaviour = (_p, signal) =>
