@@ -113,6 +113,119 @@ describe('HTTP API', () => {
       });
     });
 
+    it('a retrying scan shows the reason; its report is still 409', async () => {
+      const { scanId } = (await post({ repoUrl: 'https://github.com/a/retry' })).json<{ scanId: string }>();
+      const repo = new PostgresScanRepository(env.pool);
+      const claim = await repo.claim(scanId);
+      if (!claim) throw new Error('claim failed');
+      await repo.markRetrying(claim, { code: 'osv_unavailable', message: 'OSV answered 503' });
+      expect((await app.inject({ url: `/scans/${scanId}` })).json()).toMatchObject({
+        status: 'retrying',
+        stage: null,
+        error: { code: 'osv_unavailable', message: 'OSV answered 503' },
+      });
+      const report = await app.inject({ url: `/scans/${scanId}/report` });
+      expect(report.statusCode).toBe(409);
+      expect(report.json<{ error: { message: string } }>().error.message).toMatch(/still retrying/);
+    });
+
+    it('a partial report over HTTP: coverage, both unchecked reasons, actions with text and labelled prose', async () => {
+      const { scanId } = (await post({ repoUrl: 'https://github.com/a/partial' })).json<{ scanId: string }>();
+      const repo = new PostgresScanRepository(env.pool);
+      const claim = await repo.claim(scanId);
+      if (!claim) throw new Error('claim failed');
+      await repo.recordProgress(claim, { commitSha: 'd'.repeat(40), lockfilePath: 'package-lock.json' });
+      await repo.complete(claim, {
+        advisorySource: 'OSV.dev',
+        summaryLine: 'stored summary line',
+        explanation: {
+          source: 'ai',
+          summary: 'AI paragraph.',
+          actions: { 'npm:lodash': { text: 'AI why.', source: 'ai' } },
+        },
+        counts: { totalDeps: 4, checkedDeps: 2, unsupportedDeps: 1, failedLookups: 1 },
+        coverage: 'partial',
+        findings: [
+          {
+            ecosystem: 'npm',
+            package: 'lodash',
+            installedAs: [],
+            directAs: ['lodash'],
+            installedVersion: '4.17.20',
+            scope: 'runtime',
+            isDirect: true,
+            directParents: [],
+            installPaths: [['lodash']],
+            candidateVersion: '4.17.21',
+            fixStatus: 'candidate',
+            advisory: {
+              id: 'GHSA-29mw-wpgm-hmr9',
+              aliases: [],
+              title: 'ReDoS in lodash',
+              severity: 'medium',
+              isMalicious: false,
+              affectedRanges: [{ kind: 'range', introduced: '4.0.0', fixed: '4.17.21', lastAffected: null }],
+              references: [],
+            },
+          },
+        ],
+        unchecked: [
+          { ecosystem: 'npm', package: 'slash', version: '5.1.0', reason: 'unsupported_source' },
+          { ecosystem: 'npm', package: 'ms', version: '2.0.0', reason: 'lookup_failed' },
+        ],
+      });
+
+      const res = await app.inject({ url: `/scans/${scanId}/report` });
+      expect(res.statusCode).toBe(200);
+      const body = res.json<Record<string, unknown>>();
+      expect(body).toMatchObject({
+        scan: {
+          status: 'completed',
+          coverage: 'partial',
+          lockfilePath: 'package-lock.json',
+          advisorySource: 'OSV.dev',
+          counts: { totalDeps: 4, checkedDeps: 2, unsupportedDeps: 1, failedLookups: 1 },
+          completedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) as string,
+        },
+        summary: 'stored summary line',
+        explanation: { source: 'ai', text: 'AI paragraph.' },
+        actions: [
+          {
+            rank: 1,
+            kind: 'upgrade',
+            package: 'lodash',
+            onSummary: true,
+            whyItMatters: { source: 'ai', text: 'AI why.' },
+            text: { headline: 'Upgrade lodash 4.17.20 to candidate 4.17.21' },
+          },
+        ],
+        unchecked: [
+          { package: 'ms', reason: 'lookup_failed' },
+          { package: 'slash', reason: 'unsupported_source' },
+        ],
+        agentPrompt: expect.stringContaining('npm install lodash@4.17.21') as string,
+      });
+      // Scan JSON for polling stays small: no report data in it.
+      expect(Object.keys((await app.inject({ url: `/scans/${scanId}` })).json<object>())).not.toContain('explanation');
+    });
+
+    it('failed and unsupported scans have a report with no plan', async () => {
+      const { scanId } = (await post({ repoUrl: 'https://github.com/a/broken' })).json<{ scanId: string }>();
+      const repo = new PostgresScanRepository(env.pool);
+      const claim = await repo.claim(scanId);
+      if (!claim) throw new Error('claim failed');
+      await repo.finish(claim, { status: 'unsupported', code: 'no_lockfile', message: 'No package-lock.json' });
+      const res = await app.inject({ url: `/scans/${scanId}/report` });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        scan: { status: 'unsupported', error: { code: 'no_lockfile' } },
+        summary: null,
+        explanation: null,
+        actions: [],
+        agentPrompt: null,
+      });
+    });
+
     it.each(['not-a-uuid', randomUUID()])('404 for %s', async (id) => {
       expect((await app.inject({ url: `/scans/${id}` })).statusCode).toBe(404);
       expect((await app.inject({ url: `/scans/${id}/report` })).statusCode).toBe(404);
