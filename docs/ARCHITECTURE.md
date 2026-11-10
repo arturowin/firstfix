@@ -212,7 +212,13 @@ attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
 - `resolved` starting with `file:`, `git+`, or a tarball URL that isn't the npm registry → `unchecked_deps`,
   reason `unsupported_source`.
 - Scope: `dev: true` or `devOptional: true` → dev; `optional: true` → optional (runtime); neither → runtime.
-- Direct = listed in the root package's `dependencies` / `devDependencies` / `optionalDependencies`.
+- Direct = declared by the project: the root package's or a workspace folder's `dependencies` /
+  `devDependencies` / `optionalDependencies`, at the location that declaration resolves to (M2 decision:
+  workspace declarations count, since the repo owner wrote them).
+- Graph (`src/domain/ecosystems/npm/graph.ts`): names resolve like Node (`<dir>/node_modules/<name>`, then
+  upwards); installed packages contribute `dependencies`, `optionalDependencies`, `peerDependencies` (not
+  `devDependencies`); links into workspace folders end a walk. Breadth-first from each direct dependency gives
+  every direct parent and the shortest path from each; paths are capped at 5 per package version.
 - Dedupe by `name@version` before the advisory lookup.
 - Tolerate entries without `resolved`/`integrity`.
 - Finding granularity: one finding per `package@version` × advisory. Install paths are aggregated onto it

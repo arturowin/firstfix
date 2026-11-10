@@ -29,7 +29,7 @@ const fakeFormat: LockfileFormat = {
     const uncheckable: UncheckablePackage[] = [];
     for (const line of text.split('\n').map((l) => l.trim()).filter(Boolean)) {
       const [name, version] = line.split('==');
-      if (name && version) packages.push({ name, version, scope: 'runtime', isDirect: true });
+      if (name && version) packages.push({ name, version, scope: 'runtime', isDirect: true, directParents: [], installPaths: [[name]] });
       else uncheckable.push({ name: line.split(' @ ')[0] ?? line, version: null, reason: 'unsupported_source' });
     }
     return { kind: 'ok', packages, uncheckable };

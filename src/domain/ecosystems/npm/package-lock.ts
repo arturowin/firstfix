@@ -2,8 +2,9 @@
  * npm package-lock.json (lockfileVersion 2/3) parsing. Pure: takes the parsed JSON, returns dependencies.
  * Rules: docs/ARCHITECTURE.md "Lockfile parsing rules".
  */
-import type { LockedPackage, ParseLockfileResult, Scope, UncheckablePackage } from '../../lockfile.ts';
+import { MAX_INSTALL_PATHS, type LockedPackage, type ParseLockfileResult, type Scope, type UncheckablePackage } from '../../lockfile.ts';
 import type { LockfileFormat } from '../types.ts';
+import { buildInstallGraph } from './graph.ts';
 
 const NPM_REGISTRY = 'https://registry.npmjs.org/';
 const SCOPE_RANK: Record<Scope, number> = { runtime: 2, optional: 1, dev: 0 };
@@ -34,16 +35,6 @@ function isSupportedSource(resolved: unknown): boolean {
   return resolved.startsWith(NPM_REGISTRY);
 }
 
-function rootDependencyNames(root: unknown): Set<string> {
-  const names = new Set<string>();
-  if (!isRecord(root)) return names;
-  for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
-    const deps = root[field];
-    if (isRecord(deps)) for (const n of Object.keys(deps)) names.add(n);
-  }
-  return names;
-}
-
 export function parsePackageLock(json: unknown): ParseLockfileResult {
   if (!isRecord(json)) return { kind: 'unsupported', reason: 'package-lock.json is not a JSON object' };
 
@@ -61,8 +52,8 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
   const packages = json['packages'];
   if (!isRecord(packages)) return { kind: 'unsupported', reason: 'package-lock.json has no "packages" section' };
 
-  const direct = rootDependencyNames(packages['']);
-  const byKey = new Map<string, LockedPackage>();
+  const graph = buildInstallGraph(packages);
+  const byKey = new Map<string, LockedPackage & { parentSet: Set<string> }>();
   const uncheckable = new Map<string, UncheckablePackage>();
 
   for (const [path, value] of Object.entries(packages)) {
@@ -81,25 +72,43 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
       continue;
     }
 
-    const isDirect = path === `${NODE_MODULES}${name}` && direct.has(name);
+    const isDirect = graph.direct.has(path);
     const scope = scopeOf(entry);
+    const reach = graph.reach.get(path);
     const key = `${name}@${ver}`;
-    const seen = byKey.get(key);
+    let seen = byKey.get(key);
     if (!seen) {
-      byKey.set(key, { name, version: ver, scope, isDirect });
+      seen = { name, version: ver, scope, isDirect, directParents: [], installPaths: [], parentSet: new Set() };
+      byKey.set(key, seen);
     } else {
       if (SCOPE_RANK[scope] > SCOPE_RANK[seen.scope]) seen.scope = scope;
       seen.isDirect ||= isDirect;
     }
+    for (const p of reach?.parents ?? []) seen.parentSet.add(p);
+    seen.installPaths.push(...(reach?.paths ?? []));
   }
+
+  const packagesOut: LockedPackage[] = [...byKey.values()].map(({ parentSet, ...p }) => ({
+    ...p,
+    directParents: [...parentSet].sort(),
+    installPaths: shortestPaths(p.installPaths),
+  }));
 
   const byName = (a: { name: string; version: string | null }, b: { name: string; version: string | null }) =>
     a.name.localeCompare(b.name) || (a.version ?? '').localeCompare(b.version ?? '');
   return {
     kind: 'ok',
-    packages: [...byKey.values()].sort(byName),
+    packages: packagesOut.sort(byName),
     uncheckable: [...uncheckable.values()].sort(byName),
   };
+}
+
+/** Unique paths, shortest first (then alphabetical), capped. */
+function shortestPaths(paths: string[][]): string[][] {
+  const unique = new Map(paths.map((p) => [p.join('\u0000'), p]));
+  return [...unique.values()]
+    .sort((a, b) => a.length - b.length || a.join('/').localeCompare(b.join('/')))
+    .slice(0, MAX_INSTALL_PATHS);
 }
 
 export const packageLockFormat: LockfileFormat = {

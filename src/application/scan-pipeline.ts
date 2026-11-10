@@ -90,8 +90,8 @@ export class ScanPipeline {
           installedVersion: p.version,
           scope: p.scope,
           isDirect: p.isDirect,
-          directParents: [], // M2: dependency-graph walk
-          installPaths: [], // M2
+          directParents: p.directParents,
+          installPaths: p.installPaths,
           advisory,
           candidateVersion: candidate.version,
           fixStatus: candidate.status,

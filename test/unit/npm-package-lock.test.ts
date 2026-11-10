@@ -73,7 +73,7 @@ describe('parseLockfile', () => {
     );
     expect(r).toEqual({
       kind: 'ok',
-      packages: [{ name: 'm', version: '0.1.1', scope: 'runtime', isDirect: false }],
+      packages: [{ name: 'm', version: '0.1.1', scope: 'runtime', isDirect: false, directParents: [], installPaths: [] }],
       uncheckable: [
         { name: 'f', version: '1.0.0', reason: 'unsupported_source' },
         { name: 'g', version: '1.0.0', reason: 'unsupported_source' },
@@ -108,7 +108,7 @@ describe('parseLockfile', () => {
         'node_modules/y/node_modules/q': { version: '2.0.0' },
       }),
     );
-    expect(r.kind === 'ok' && r.packages).toEqual([
+    expect(r.kind === 'ok' && r.packages.map(({ name, version, scope, isDirect }) => ({ name, version, scope, isDirect }))).toEqual([
       { name: 'q', version: '1.0.0', scope: 'runtime', isDirect: true },
       { name: 'q', version: '2.0.0', scope: 'runtime', isDirect: false },
     ]);
@@ -148,11 +148,18 @@ describe('parseLockfile', () => {
       expect(find('request', '2.88.2')).toMatchObject({ isDirect: true });
       expect(find('minimist', '1.2.0')).toMatchObject({ isDirect: true, scope: 'dev' });
       expect(find('flatmap-stream', '0.1.1')).toMatchObject({ isDirect: true, scope: 'runtime' });
+      // Who pulls the transitive ones in, and how.
+      expect(find('qs', '6.7.0')).toMatchObject({ directParents: ['express'], installPaths: [['express', 'qs']] });
+      expect(find('qs', '6.5.5')).toMatchObject({ directParents: ['request'], installPaths: [['request', 'qs']] });
     });
 
     it('skips the workspace link and folder, and marks the git dependency uncheckable', () => {
       expect(r.packages.some((p) => p.name.includes('internal-utils'))).toBe(false);
       expect(r.uncheckable).toEqual([{ name: 'slash', version: '5.1.0', reason: 'unsupported_source' }]);
+    });
+
+    it('every transitive package is reached from some direct dependency', () => {
+      expect(r.packages.filter((p) => !p.isDirect && p.directParents.length === 0)).toEqual([]);
     });
 
     it('counts: 106 checkable package versions', () => {

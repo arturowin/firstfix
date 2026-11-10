@@ -12,7 +12,13 @@ export interface LockedPackage {
   scope: Scope;
   /** Declared by the project itself (root or a workspace) and installed where that declaration resolves. */
   isDirect: boolean;
+  /** Every direct dependency that pulls it in (itself excluded), sorted. Empty for formats without a graph. */
+  directParents: string[];
+  /** Shortest install paths from direct dependencies, shortest first, capped at MAX_INSTALL_PATHS. */
+  installPaths: string[][];
 }
+
+export const MAX_INSTALL_PATHS = 5;
 
 export type UnsupportedSourceReason = 'unsupported_source';
 
