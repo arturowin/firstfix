@@ -1,6 +1,6 @@
 import { isMaliciousId, severityFromLabel, type Advisory } from '../../domain/advisory.ts';
 import { TransientError } from '../../ports/errors.ts';
-import { packageKey, type AdvisoryLookup, type PackageVersion, type VulnDatabase } from '../../ports/vuln-database.ts';
+import { packageKey, type AdvisoryLookup, type PackageRef, type VulnDatabase } from '../../ports/vuln-database.ts';
 import { fetchWithTimeout, USER_AGENT } from '../http.ts';
 
 export interface OsvOptions {
@@ -12,7 +12,7 @@ export interface OsvOptions {
 }
 
 interface BatchQuery {
-  package: { ecosystem: 'npm'; name: string };
+  package: { ecosystem: string; name: string };
   version: string;
   page_token?: string;
 }
@@ -43,7 +43,7 @@ export class OsvVulnDatabase implements VulnDatabase {
     this.detailConcurrency = options.detailConcurrency ?? 8;
   }
 
-  async lookup(packages: PackageVersion[], signal: AbortSignal): Promise<AdvisoryLookup> {
+  async lookup(packages: PackageRef[], signal: AbortSignal): Promise<AdvisoryLookup> {
     const idsByPackage = await this.queryIds(packages, signal);
 
     const uniqueIds = [...new Set([...idsByPackage.values()].flat())].sort();
@@ -58,15 +58,15 @@ export class OsvVulnDatabase implements VulnDatabase {
       if (ids.length === 0) continue;
       result.set(
         packageKey(pkg),
-        ids.map((id) => toAdvisory(details.get(id) ?? { id }, pkg.name)),
+        ids.map((id) => toAdvisory(details.get(id) ?? { id }, pkg)),
       );
     }
     return result;
   }
 
-  private async queryIds(packages: PackageVersion[], signal: AbortSignal): Promise<Map<string, string[]>> {
+  private async queryIds(packages: PackageRef[], signal: AbortSignal): Promise<Map<string, string[]>> {
     const ids = new Map<string, string[]>();
-    let pending: { pkg: PackageVersion; pageToken?: string }[] = packages.map((pkg) => ({ pkg }));
+    let pending: { pkg: PackageRef; pageToken?: string }[] = packages.map((pkg) => ({ pkg }));
 
     // Each round sends at most batchSize queries; queries that returned a page token go into the next round.
     while (pending.length > 0) {
@@ -74,7 +74,8 @@ export class OsvVulnDatabase implements VulnDatabase {
       for (let i = 0; i < pending.length; i += this.batchSize) {
         const chunk = pending.slice(i, i + this.batchSize);
         const queries: BatchQuery[] = chunk.map(({ pkg, pageToken }) => ({
-          package: { ecosystem: 'npm', name: pkg.name },
+          // Our ecosystem ids are OSV's names, so they pass through unchanged.
+          package: { ecosystem: pkg.ecosystem, name: pkg.name },
           version: pkg.version,
           ...(pageToken ? { page_token: pageToken } : {}),
         }));
@@ -127,10 +128,10 @@ export class OsvVulnDatabase implements VulnDatabase {
   }
 }
 
-/** Only the parts of an OSV record that apply to this npm package. */
-export function toAdvisory(v: OsvVuln, packageName: string): Advisory {
+/** Only the parts of an OSV record that apply to this package (same ecosystem, exact name). */
+export function toAdvisory(v: OsvVuln, pkg: { ecosystem: string; name: string }): Advisory {
   const ranges = (v.affected ?? [])
-    .filter((a) => a.package?.ecosystem === 'npm' && a.package.name === packageName)
+    .filter((a) => a.package?.ecosystem === pkg.ecosystem && a.package.name === pkg.name)
     .flatMap((a) => a.ranges ?? []);
   return {
     id: v.id,

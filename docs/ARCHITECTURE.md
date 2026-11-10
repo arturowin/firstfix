@@ -164,7 +164,8 @@ attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
   `RubyGems`, `Go`, `Packagist`, `NuGet`). A naming choice, not a dependency: the OSV adapter passes them
   through; another advisory source's adapter maps its own names.
 - **Lockfile format** (pure, `src/domain/ecosystems/`): `{ ecosystem, fileNames, parse(text) }`, returning the
-  existing `ParseLockfileResult` with `ecosystem` on each package. A registry lists the supported formats in
+  existing `ParseLockfileResult` (`ok` | `unsupported` | `invalid`). The ecosystem is the format's, attached by
+  the pipeline to every package, so a parser cannot mislabel one. A registry lists the supported formats in
   priority order; today only `package-lock.json`. A second format for the same ecosystem (`yarn.lock`,
   `pnpm-lock.yaml`) is another entry. Parsing does no I/O, so formats live in `domain/`, not behind a port.
 - **Version scheme** per ecosystem: `compare`, `isMajorJump`, `inRange(version, range: AffectedRange)`. npm uses `semver`.

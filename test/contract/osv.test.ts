@@ -68,14 +68,14 @@ describe('OsvVulnDatabase', () => {
 
     const packages = pick.map((i) => {
       const q = req.queries[i];
-      return { name: q?.package.name ?? '', version: q?.version ?? '' };
+      return { ecosystem: 'npm', name: q?.package.name ?? '', version: q?.version ?? '' };
     });
     const lookup = await new OsvVulnDatabase().lookup(packages, signal());
 
     expect(sent).toEqual({ queries: pick.map((i) => req.queries[i]) });
-    expect(lookup.has('left-pad@1.3.0')).toBe(false);
+    expect(lookup.has('npm:left-pad@1.3.0')).toBe(false);
 
-    const request = lookup.get('request@2.88.2');
+    const request = lookup.get('npm:request@2.88.2');
     expect(request).toEqual([
       {
         id: 'GHSA-p8p7-x288-28g6',
@@ -89,7 +89,7 @@ describe('OsvVulnDatabase', () => {
       },
     ]);
 
-    const flatmap = lookup.get('flatmap-stream@0.1.1') ?? [];
+    const flatmap = lookup.get('npm:flatmap-stream@0.1.1') ?? [];
     expect(flatmap.map((a) => [a.id, a.severity, a.isMalicious]).sort()).toEqual([
       ['GHSA-9x64-5r7x-2q53', 'critical', false],
       ['GHSA-mh6f-8j2x-4483', 'critical', false],
@@ -108,10 +108,10 @@ describe('OsvVulnDatabase', () => {
       }),
     );
     serveVulnFixtures(new Map());
-    const pkgs = ['a', 'b', 'c', 'd', 'e'].map((name) => ({ name, version: '1.0.0' }));
+    const pkgs = ['a', 'b', 'c', 'd', 'e'].map((name) => ({ ecosystem: 'npm', name, version: '1.0.0' }));
     const lookup = await new OsvVulnDatabase({ batchSize: 2 }).lookup(pkgs, signal());
     expect(batches).toEqual([['a', 'b'], ['c', 'd'], ['e']]);
-    for (const p of pkgs) expect(lookup.get(`${p.name}@1.0.0`)?.map((a) => a.id)).toEqual([`ID-${p.name}`]);
+    for (const p of pkgs) expect(lookup.get(`npm:${p.name}@1.0.0`)?.map((a) => a.id)).toEqual([`ID-${p.name}`]);
   });
 
   it('follows next_page_token by re-sending only the paginated query (recorded pagination shape)', async () => {
@@ -135,18 +135,18 @@ describe('OsvVulnDatabase', () => {
 
     const lookup = await new OsvVulnDatabase().lookup(
       [
-        { name: 'big', version: '1.0.0' },
-        { name: 'lodash', version: '4.17.20' },
+        { ecosystem: 'npm', name: 'big', version: '1.0.0' },
+        { ecosystem: 'npm', name: 'lodash', version: '4.17.20' },
       ],
       signal(),
     );
 
     expect(rounds.map((r) => r.length)).toEqual([2, 1, 1]);
     expect(rounds[1]?.[0]).toMatchObject({ package: { name: 'big' }, page_token: token1 });
-    const big = lookup.get('big@1.0.0')?.map((a) => a.id) ?? [];
+    const big = lookup.get('npm:big@1.0.0')?.map((a) => a.id) ?? [];
     expect(big).toHaveLength(3 + 3 + 1);
     expect(new Set(big).size).toBe(big.length); // pages don't overlap
-    expect(lookup.get('lodash@4.17.20')).toHaveLength(4);
+    expect(lookup.get('npm:lodash@4.17.20')).toHaveLength(4);
   });
 
   it('fetches each advisory once, even when several packages share it', async () => {
@@ -160,15 +160,42 @@ describe('OsvVulnDatabase', () => {
     serveVulnFixtures(calls);
     const lookup = await new OsvVulnDatabase().lookup(
       [
-        { name: 'lodash', version: '4.17.20' },
-        { name: 'lodash-es', version: '4.17.20' },
+        { ecosystem: 'npm', name: 'lodash', version: '4.17.20' },
+        { ecosystem: 'npm', name: 'lodash-es', version: '4.17.20' },
       ],
       signal(),
     );
     expect(calls.get('GHSA-29mw-wpgm-hmr9')).toBe(1);
     // same advisory, different package → ranges filtered per package
-    expect(lookup.get('lodash@4.17.20')?.[0]?.affectedRanges).toHaveLength(1);
-    expect(lookup.get('lodash-es@4.17.20')?.[0]?.affectedRanges).toHaveLength(1);
+    expect(lookup.get('npm:lodash@4.17.20')?.[0]?.affectedRanges).toHaveLength(1);
+    expect(lookup.get('npm:lodash-es@4.17.20')?.[0]?.affectedRanges).toHaveLength(1);
+  });
+
+  it('passes the ecosystem through and filters `affected` by ecosystem and exact name', async () => {
+    let sent: Batch | undefined;
+    server.use(
+      http.post(`${OSV}/v1/querybatch`, async ({ request }) => {
+        sent = (await request.json()) as Batch;
+        return HttpResponse.json({ results: sent.queries.map(() => ({ vulns: [{ id: 'GHSA-29mw-wpgm-hmr9' }] })) });
+      }),
+    );
+    serveVulnFixtures(new Map());
+    const lookup = await new OsvVulnDatabase().lookup(
+      [
+        { ecosystem: 'RubyGems', name: 'lodash-rails', version: '4.17.20' },
+        // Same name in another ecosystem: the advisory's RubyGems entry must not apply to it.
+        { ecosystem: 'npm', name: 'lodash-rails', version: '4.17.20' },
+      ],
+      signal(),
+    );
+    expect(sent?.queries.map((q) => q.package)).toEqual([
+      { ecosystem: 'RubyGems', name: 'lodash-rails' },
+      { ecosystem: 'npm', name: 'lodash-rails' },
+    ]);
+    expect(lookup.get('RubyGems:lodash-rails@4.17.20')?.[0]?.affectedRanges).toEqual([
+      { type: 'ECOSYSTEM', events: [{ introduced: '4.0.0' }, { fixed: '4.17.21' }] },
+    ]);
+    expect(lookup.get('npm:lodash-rails@4.17.20')?.[0]?.affectedRanges).toEqual([]);
   });
 
   it.each([
@@ -178,7 +205,7 @@ describe('OsvVulnDatabase', () => {
   ])('transient: %s', async (_label, respond, code) => {
     server.use(http.post(`${OSV}/v1/querybatch`, respond));
     const err: unknown = await new OsvVulnDatabase()
-      .lookup([{ name: 'a', version: '1.0.0' }], signal())
+      .lookup([{ ecosystem: 'npm', name: 'a', version: '1.0.0' }], signal())
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(TransientError);
     expect(err).toMatchObject({ code });
@@ -189,7 +216,7 @@ describe('OsvVulnDatabase', () => {
       http.post(`${OSV}/v1/querybatch`, () => HttpResponse.json({ results: [{ vulns: [{ id: 'X-1' }] }] })),
       http.get(`${OSV}/v1/vulns/:id`, () => new HttpResponse(null, { status: 500 })),
     );
-    await expect(new OsvVulnDatabase().lookup([{ name: 'a', version: '1.0.0' }], signal())).rejects.toBeInstanceOf(
+    await expect(new OsvVulnDatabase().lookup([{ ecosystem: 'npm', name: 'a', version: '1.0.0' }], signal())).rejects.toBeInstanceOf(
       TransientError,
     );
   });

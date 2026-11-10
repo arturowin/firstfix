@@ -101,7 +101,7 @@ describe('end to end: submit → worker → report', () => {
       scope: 'runtime',
     });
     expect(byPackage['lodash']?.[0]).toMatchObject({ severity: 'medium', installedVersion: '4.17.20' });
-    expect(report?.unchecked).toEqual([{ package: 'slash', version: '5.1.0', reason: 'unsupported_source' }]);
+    expect(report?.unchecked).toEqual([{ ecosystem: 'npm', package: 'slash', version: '5.1.0', reason: 'unsupported_source' }]);
   });
 
   it('a missing repository ends failed with a clear reason, without retries', async () => {

@@ -18,7 +18,8 @@ function lockfile(packages: Record<string, unknown>, lockfileVersion = 3): strin
 function source(lock: string | null | Error): RepoSource {
   return {
     resolveDefaultCommit: () => Promise.resolve({ sha: SHA, branch: 'main' }),
-    readLockfile: () => (lock instanceof Error ? Promise.reject(lock) : Promise.resolve(lock)),
+    readFile: (_repo, _sha, path) =>
+      lock instanceof Error ? Promise.reject(lock) : Promise.resolve(path === 'package-lock.json' ? lock : null),
   };
 }
 
@@ -75,7 +76,7 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
     const pipeline = new ScanPipeline({
       scans,
       source: source(twoPackages),
-      vulns: vulns(new Map([['a@1.0.0', [advisory('GHSA-1'), advisory('MAL-1')]]])),
+      vulns: vulns(new Map([['npm:a@1.0.0', [advisory('GHSA-1'), advisory('MAL-1')]]])),
     });
     expect(await pipeline.run(id, signal())).toBe('completed');
 
@@ -83,6 +84,7 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
     expect(report?.scan).toMatchObject({
       status: 'completed',
       commitSha: SHA,
+      lockfilePath: 'package-lock.json',
       coverage: 'full',
       counts: { totalDeps: 3, checkedDeps: 2, unsupportedDeps: 1, failedLookups: 0 },
     });
@@ -90,7 +92,7 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
       ['a', 'GHSA-1', 'runtime', true],
       ['a', 'MAL-1', 'runtime', true],
     ]);
-    expect(report?.unchecked).toEqual([{ package: 'g', version: '1.0.0', reason: 'unsupported_source' }]);
+    expect(report?.unchecked).toEqual([{ ecosystem: 'npm', package: 'g', version: '1.0.0', reason: 'unsupported_source' }]);
   });
 
   it('zero dependencies → completed with nothing to check', async () => {
@@ -119,7 +121,7 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
       scans,
       source: {
         resolveDefaultCommit: () => Promise.reject(new PermanentError('repo_not_found', 'Repository not found or private')),
-        readLockfile: () => Promise.resolve(null),
+        readFile: () => Promise.resolve(null),
       },
       vulns: vulns(new Map()),
     });
@@ -152,7 +154,7 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
       scans,
       source: source(twoPackages),
       // While the old attempt waits on OSV, the job is re-delivered and claimed again.
-      vulns: vulns(new Map([['a@1.0.0', [advisory('GHSA-1')]]]), async () => {
+      vulns: vulns(new Map([['npm:a@1.0.0', [advisory('GHSA-1')]]]), async () => {
         newer = await scans.claim(id);
       }),
     });

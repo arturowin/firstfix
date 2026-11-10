@@ -1,4 +1,5 @@
 import type { Advisory, Severity } from '../domain/advisory.ts';
+import type { EcosystemId } from '../domain/ecosystems/types.ts';
 import type { Scope } from '../domain/lockfile.ts';
 
 export type ScanStatus = 'queued' | 'running' | 'retrying' | 'completed' | 'unsupported' | 'failed';
@@ -15,6 +16,8 @@ export interface ScanView {
   id: string;
   repo: { owner: string; name: string; url: string };
   commitSha: string | null;
+  /** Which lockfile was scanned, relative to the repository root. */
+  lockfilePath: string | null;
   status: ScanStatus;
   stage: ScanStage | null;
   counts: ScanCounts;
@@ -26,6 +29,7 @@ export interface ScanView {
 }
 
 export interface FindingInput {
+  ecosystem: EcosystemId;
   package: string;
   installedVersion: string;
   scope: Scope;
@@ -37,6 +41,7 @@ export interface FindingInput {
 }
 
 export interface FindingView {
+  ecosystem: EcosystemId;
   package: string;
   installedVersion: string;
   scope: Scope;
@@ -52,6 +57,7 @@ export interface FindingView {
 }
 
 export interface UncheckedView {
+  ecosystem: EcosystemId;
   package: string;
   version: string | null;
   reason: 'unsupported_source' | 'lookup_failed';
@@ -90,7 +96,7 @@ export interface ScanRepository {
   /** Each returns false when the attempt is stale (0 rows): the caller stops quietly. */
   recordProgress(
     claim: ClaimedScan,
-    update: { stage?: ScanStage; commitSha?: string; counts?: Partial<ScanCounts> },
+    update: { stage?: ScanStage; commitSha?: string; lockfilePath?: string; counts?: Partial<ScanCounts> },
   ): Promise<boolean>;
   /** Findings + completion in one transaction that first locks the owned, non-terminal row. */
   complete(claim: ClaimedScan, completion: Completion): Promise<boolean>;

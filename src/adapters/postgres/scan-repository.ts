@@ -23,6 +23,7 @@ interface ScanRow {
   repo_name: string;
   repo_url_normalized: string;
   commit_sha: string | null;
+  lockfile_path: string | null;
   status: ScanStatus;
   stage: ScanStage | null;
   total_deps: number;
@@ -42,6 +43,7 @@ function toView(r: ScanRow): ScanView {
     id: r.id,
     repo: { owner: r.repo_owner, name: r.repo_name, url: r.repo_url_normalized },
     commitSha: r.commit_sha,
+    lockfilePath: r.lockfile_path,
     status: r.status,
     stage: r.stage,
     counts: {
@@ -82,6 +84,7 @@ export class PostgresScanRepository implements ScanRepository {
     const scan = await this.get(scanId);
     if (!scan) return null;
     const findings = await this.pool.query<{
+      ecosystem: string;
       package: string;
       installed_version: string;
       scope: Scope;
@@ -95,19 +98,21 @@ export class PostgresScanRepository implements ScanRepository {
       candidate_version: string | null;
       references: { type: string; url: string }[];
     }>(
-      `SELECT package, installed_version, scope, is_direct, direct_parents, advisory_id, aliases, severity,
+      `SELECT ecosystem, package, installed_version, scope, is_direct, direct_parents, advisory_id, aliases, severity,
               is_malicious, title, candidate_version, "references"
-         FROM findings WHERE scan_id = $1 ORDER BY package, installed_version, advisory_id`,
+         FROM findings WHERE scan_id = $1 ORDER BY ecosystem, package, installed_version, advisory_id`,
       [scanId],
     );
     const unchecked = await this.pool.query<UncheckedView>(
-      `SELECT package, version, reason FROM unchecked_deps WHERE scan_id = $1 ORDER BY package, version`,
+      `SELECT ecosystem, package, version, reason FROM unchecked_deps WHERE scan_id = $1
+        ORDER BY ecosystem, package, version`,
       [scanId],
     );
     return {
       scan,
       findings: findings.rows.map(
         (f): FindingView => ({
+          ecosystem: f.ecosystem,
           package: f.package,
           installedVersion: f.installed_version,
           scope: f.scope,
@@ -140,7 +145,7 @@ export class PostgresScanRepository implements ScanRepository {
 
   async recordProgress(
     claim: ClaimedScan,
-    update: { stage?: ScanStage; commitSha?: string; counts?: Partial<ScanCounts> },
+    update: { stage?: ScanStage; commitSha?: string; lockfilePath?: string; counts?: Partial<ScanCounts> },
   ): Promise<boolean> {
     const sets: string[] = [];
     const values: unknown[] = [claim.scanId, claim.attempt];
@@ -150,6 +155,7 @@ export class PostgresScanRepository implements ScanRepository {
     };
     if (update.stage) set('stage', update.stage);
     if (update.commitSha) set('commit_sha', update.commitSha);
+    if (update.lockfilePath) set('lockfile_path', update.lockfilePath);
     for (const [k, v] of Object.entries(update.counts ?? {})) {
       set(COUNT_COLUMNS[k as keyof ScanCounts], v);
     }
@@ -175,21 +181,22 @@ export class PostgresScanRepository implements ScanRepository {
 
       if (c.findings.length > 0) {
         await client.query(
-          `INSERT INTO findings (scan_id, package, installed_version, scope, is_direct, direct_parents, install_paths,
+          `INSERT INTO findings (scan_id, ecosystem, package, installed_version, scope, is_direct, direct_parents, install_paths,
                                  advisory_id, aliases, severity, is_malicious, title, affected_ranges,
                                  candidate_version, "references")
-           SELECT $1, f.package, f.installed_version, f.scope, f.is_direct,
+           SELECT $1, f.ecosystem, f.package, f.installed_version, f.scope, f.is_direct,
                   ARRAY(SELECT jsonb_array_elements_text(f.direct_parents)), f.install_paths,
                   f.advisory_id, ARRAY(SELECT jsonb_array_elements_text(f.aliases)), f.severity, f.is_malicious,
                   f.title, f.affected_ranges, f.candidate_version, f."references"
              FROM jsonb_to_recordset($2::jsonb) AS f(
-                  package text, installed_version text, scope text, is_direct boolean, direct_parents jsonb,
+                  ecosystem text, package text, installed_version text, scope text, is_direct boolean, direct_parents jsonb,
                   install_paths jsonb, advisory_id text, aliases jsonb, severity text, is_malicious boolean,
                   title text, affected_ranges jsonb, candidate_version text, "references" jsonb)`,
           [
             claim.scanId,
             JSON.stringify(
               c.findings.map((f) => ({
+                ecosystem: f.ecosystem,
                 package: f.package,
                 installed_version: f.installedVersion,
                 scope: f.scope,
@@ -212,9 +219,9 @@ export class PostgresScanRepository implements ScanRepository {
 
       if (c.unchecked.length > 0) {
         await client.query(
-          `INSERT INTO unchecked_deps (scan_id, package, version, reason)
-           SELECT $1, u.package, u.version, u.reason
-             FROM jsonb_to_recordset($2::jsonb) AS u(package text, version text, reason text)`,
+          `INSERT INTO unchecked_deps (scan_id, ecosystem, package, version, reason)
+           SELECT $1, u.ecosystem, u.package, u.version, u.reason
+             FROM jsonb_to_recordset($2::jsonb) AS u(ecosystem text, package text, version text, reason text)`,
           [claim.scanId, JSON.stringify(c.unchecked)],
         );
       }

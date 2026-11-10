@@ -1,4 +1,5 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import pg from 'pg';
@@ -204,5 +205,54 @@ describe('migrate: failures', () => {
     await migrate(pool, dir);
     await writeFile(path.join(dir, '001_a.sql'), 'CREATE TABLE a (id int, extra text);');
     await expect(migrate(pool, dir)).rejects.toThrow(/001_a\.sql was changed after it was applied/);
+  });
+});
+
+describe('migration 002: ecosystem', () => {
+  let db: TestDatabase;
+  let pool: pg.Pool;
+  let dir: string;
+
+  beforeAll(async () => {
+    db = await createTestDatabase();
+    pool = new pg.Pool({ connectionString: db.url });
+    // Start from a database that only has 001, with data written before ecosystems existed.
+    dir = await mkdtemp(path.join(tmpdir(), 'migrations-001-'));
+    await copyFile(path.join(MIGRATIONS, '001_init.sql'), path.join(dir, '001_init.sql'));
+    await migrate(pool, dir);
+  });
+
+  afterAll(async () => {
+    await pool.end();
+    await db.drop();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('keeps existing rows as npm, and the unique key includes the ecosystem', async () => {
+    const id = randomUUID();
+    await pool.query(
+      `INSERT INTO scans (id, repo_owner, repo_name, repo_url_normalized) VALUES ($1, 'o', 'r', 'https://github.com/o/r')`,
+      [id],
+    );
+    const finding = `INSERT INTO findings (scan_id, package, installed_version, scope, is_direct, advisory_id, severity)
+                     VALUES ($1, 'lodash', '4.17.20', 'runtime', true, 'GHSA-1', 'high')`;
+    await pool.query(finding, [id]);
+    await pool.query(`INSERT INTO unchecked_deps (scan_id, package, version, reason) VALUES ($1, 'g', '1.0.0', 'unsupported_source')`, [id]);
+
+    expect((await migrate(pool, MIGRATIONS)).applied).toEqual(['002_ecosystem.sql']);
+
+    const f = await pool.query<{ ecosystem: string }>('SELECT ecosystem FROM findings WHERE scan_id = $1', [id]);
+    const u = await pool.query<{ ecosystem: string }>('SELECT ecosystem FROM unchecked_deps WHERE scan_id = $1', [id]);
+    expect([...f.rows, ...u.rows]).toEqual([{ ecosystem: 'npm' }, { ecosystem: 'npm' }]);
+    const s = await pool.query<{ lockfile_path: string | null }>('SELECT lockfile_path FROM scans WHERE id = $1', [id]);
+    expect(s.rows).toEqual([{ lockfile_path: null }]);
+
+    // Same name@version × advisory in another ecosystem is a different finding; a duplicate in npm is not.
+    await pool.query(
+      `INSERT INTO findings (scan_id, ecosystem, package, installed_version, scope, is_direct, advisory_id, severity)
+       VALUES ($1, 'PyPI', 'lodash', '4.17.20', 'runtime', true, 'GHSA-1', 'high')`,
+      [id],
+    );
+    await expect(pool.query(finding, [id])).rejects.toThrow(/findings_unique/);
   });
 });

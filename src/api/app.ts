@@ -30,6 +30,7 @@ function scanJson(s: ScanView) {
     id: s.id,
     repo: s.repo,
     commitSha: s.commitSha,
+    lockfilePath: s.lockfilePath,
     status: s.status,
     stage: s.stage,
     counts: s.counts,

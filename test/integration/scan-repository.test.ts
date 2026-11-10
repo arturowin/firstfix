@@ -31,6 +31,7 @@ describe('PostgresScanRepository: attempt ownership', () => {
     coverage: 'full',
     findings: [
       {
+        ecosystem: 'npm',
         package: 'lodash',
         installedVersion: '4.17.20',
         scope: 'runtime',
@@ -49,7 +50,7 @@ describe('PostgresScanRepository: attempt ownership', () => {
         },
       },
     ],
-    unchecked: [{ package: 'slash', version: '5.1.0', reason: 'unsupported_source' }],
+    unchecked: [{ ecosystem: 'npm', package: 'slash', version: '5.1.0', reason: 'unsupported_source' }],
   };
 
   it('claim starts attempt 1 as running/fetching; a new claim makes the old attempt stale', async () => {
@@ -92,6 +93,7 @@ describe('PostgresScanRepository: attempt ownership', () => {
     expect(report?.scan.completedAt).toBeInstanceOf(Date);
     expect(report?.findings).toEqual([
       {
+        ecosystem: 'npm',
         package: 'lodash',
         installedVersion: '4.17.20',
         scope: 'runtime',
@@ -130,7 +132,7 @@ describe('PostgresScanRepository: attempt ownership', () => {
     const bad: Completion = {
       ...completion,
       // unchecked reason violates the CHECK constraint after findings were inserted
-      unchecked: [{ package: 'x', version: null, reason: 'nope' as 'lookup_failed' }],
+      unchecked: [{ ecosystem: 'npm', package: 'x', version: null, reason: 'nope' as 'lookup_failed' }],
     };
     await expect(repo.complete(claim, bad)).rejects.toThrow(/check constraint/);
     const f = await env.pool.query('SELECT 1 FROM findings WHERE scan_id = $1', [id]);

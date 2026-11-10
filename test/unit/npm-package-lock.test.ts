@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseLockfile, type LockedPackage } from '../../src/domain/lockfile.ts';
+import { parsePackageLock as parseLockfile, packageLockFormat } from '../../src/domain/ecosystems/npm/package-lock.ts';
+import type { LockedPackage } from '../../src/domain/lockfile.ts';
 
 const demo: unknown = JSON.parse(
   readFileSync(path.join(import.meta.dirname, '..', 'fixtures', 'lockfiles', 'demo.package-lock.json'), 'utf8'),
@@ -116,6 +117,21 @@ describe('parseLockfile', () => {
   it('a top-level package not listed by the root is transitive', () => {
     const r = parseLockfile(lock({ '': {}, 'node_modules/hoisted': { version: '1.0.0' } }));
     expect(r.kind === 'ok' && r.packages[0]?.isDirect).toBe(false);
+  });
+
+  describe('as a registered lockfile format', () => {
+    it('is the npm package-lock.json format', () => {
+      expect(packageLockFormat).toMatchObject({ ecosystem: 'npm', fileNames: ['package-lock.json'] });
+    });
+
+    it('parses text; invalid JSON is "invalid", not "unsupported"', () => {
+      expect(packageLockFormat.parse('{not json')).toEqual({ kind: 'invalid', reason: 'package-lock.json is not valid JSON' });
+      expect(packageLockFormat.parse(JSON.stringify(lock({}, 1))).kind).toBe('unsupported');
+      expect(packageLockFormat.parse(JSON.stringify(lock({ 'node_modules/a': { version: '1.0.0' } })))).toMatchObject({
+        kind: 'ok',
+        packages: [{ name: 'a', version: '1.0.0' }],
+      });
+    });
   });
 
   describe('demo fixture repo lockfile', () => {

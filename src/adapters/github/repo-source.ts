@@ -8,8 +8,8 @@ export interface GitHubOptions {
   apiBase?: string;
   rawBase?: string;
   timeoutMs?: number;
-  /** Lockfiles larger than this are refused (memory bound). */
-  maxLockfileBytes?: number;
+  /** Files larger than this are refused (memory bound). */
+  maxFileBytes?: number;
 }
 
 const SHA = /^[0-9a-f]{40}$/;
@@ -19,14 +19,14 @@ export class GitHubRepoSource implements RepoSource {
   private readonly apiBase: string;
   private readonly rawBase: string;
   private readonly timeoutMs: number;
-  private readonly maxLockfileBytes: number;
+  private readonly maxFileBytes: number;
 
   constructor(options: GitHubOptions = {}) {
     this.token = options.token;
     this.apiBase = options.apiBase ?? 'https://api.github.com';
     this.rawBase = options.rawBase ?? 'https://raw.githubusercontent.com';
     this.timeoutMs = options.timeoutMs ?? 15_000;
-    this.maxLockfileBytes = options.maxLockfileBytes ?? 50 * 1024 * 1024;
+    this.maxFileBytes = options.maxFileBytes ?? 50 * 1024 * 1024;
   }
 
   async resolveDefaultCommit(
@@ -57,9 +57,18 @@ export class GitHubRepoSource implements RepoSource {
     return { sha, branch };
   }
 
-  async readLockfile(repo: { owner: string; name: string }, sha: string, signal: AbortSignal): Promise<string | null> {
-    if (!SHA.test(sha)) throw new Error(`refusing to read a lockfile at a non-SHA ref: ${sha}`);
-    const url = `${this.rawBase}/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/${sha}/package-lock.json`;
+  async readFile(
+    repo: { owner: string; name: string },
+    sha: string,
+    path: string,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    if (!SHA.test(sha)) throw new Error(`refusing to read a file at a non-SHA ref: ${sha}`);
+    if (path.split('/').some((seg) => seg === '' || seg === '.' || seg === '..')) {
+      throw new Error(`refusing to read an unnormalised path: ${path}`);
+    }
+    const filePath = path.split('/').map(encodeURIComponent).join('/');
+    const url = `${this.rawBase}/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/${sha}/${filePath}`;
     const res = await fetchWithTimeout(url, {
       headers: { 'user-agent': USER_AGENT, ...(this.token ? { authorization: `Bearer ${this.token}` } : {}) },
       timeoutMs: this.timeoutMs,
@@ -70,9 +79,9 @@ export class GitHubRepoSource implements RepoSource {
     if (!res.ok) throw classify(res, 'raw');
 
     const declared = Number(res.headers.get('content-length') ?? 0);
-    if (declared > this.maxLockfileBytes) throw tooLarge(this.maxLockfileBytes);
+    if (declared > this.maxFileBytes) throw tooLarge(path, this.maxFileBytes);
     const text = await res.text();
-    if (Buffer.byteLength(text) > this.maxLockfileBytes) throw tooLarge(this.maxLockfileBytes);
+    if (Buffer.byteLength(text) > this.maxFileBytes) throw tooLarge(path, this.maxFileBytes);
     return text;
   }
 
@@ -106,8 +115,8 @@ function notFoundOrPrivate(): PermanentError {
   );
 }
 
-function tooLarge(max: number): PermanentError {
-  return new PermanentError('lockfile_too_large', `package-lock.json is larger than ${max / 1024 / 1024} MB`, 'unsupported');
+function tooLarge(path: string, max: number): PermanentError {
+  return new PermanentError('lockfile_too_large', `${path} is larger than ${max / 1024 / 1024} MB`, 'unsupported');
 }
 
 function classify(res: Response, kind: 'api' | 'raw'): Error {

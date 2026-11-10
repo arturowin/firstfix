@@ -46,7 +46,7 @@ describe('GitHubRepoSource', () => {
     const gh = new GitHubRepoSource();
     const commit = await gh.resolveDefaultCommit(repo, signal());
     expect(commit).toEqual({ sha: SHA, branch: 'main' });
-    expect(await gh.readLockfile(repo, commit.sha, signal())).toBe('{"lockfileVersion":3}');
+    expect(await gh.readFile(repo, commit.sha, 'package-lock.json', signal())).toBe('{"lockfileVersion":3}');
     expect(seen.paths).toEqual([
       '/repos/owner/repo',
       '/repos/owner/repo/commits/main',
@@ -63,12 +63,28 @@ describe('GitHubRepoSource', () => {
   });
 
   it('refuses to read at anything but a SHA (pinned-commit rule)', async () => {
-    await expect(new GitHubRepoSource().readLockfile(repo, 'main', signal())).rejects.toThrow(/non-SHA/);
+    await expect(new GitHubRepoSource().readFile(repo, 'main', 'package-lock.json', signal())).rejects.toThrow(/non-SHA/);
   });
 
-  it('no lockfile at that SHA → null', async () => {
+  it.each(['../secrets', 'a//b', '/abs', './x'])('refuses an unnormalised path: %s', async (p) => {
+    await expect(new GitHubRepoSource().readFile(repo, SHA, p, signal())).rejects.toThrow(/unnormalised/);
+  });
+
+  it('reads any root-relative path at the SHA, encoding each segment', async () => {
+    const seen: string[] = [];
+    server.use(
+      http.get(`${RAW}/owner/repo/:sha/*`, ({ request }) => {
+        seen.push(new URL(request.url).pathname);
+        return HttpResponse.text('ok');
+      }),
+    );
+    expect(await new GitHubRepoSource().readFile(repo, SHA, 'sub dir/poetry.lock', signal())).toBe('ok');
+    expect(seen).toEqual([`/owner/repo/${SHA}/sub%20dir/poetry.lock`]);
+  });
+
+  it('no such file at that SHA → null', async () => {
     server.use(http.get(`${RAW}/owner/repo/:sha/package-lock.json`, () => new HttpResponse(null, { status: 404 })));
-    expect(await new GitHubRepoSource().readLockfile(repo, SHA, signal())).toBeNull();
+    expect(await new GitHubRepoSource().readFile(repo, SHA, 'package-lock.json', signal())).toBeNull();
   });
 
   it.each([
@@ -138,8 +154,11 @@ describe('GitHubRepoSource', () => {
 
   it('refuses lockfiles over the size limit (unsupported)', async () => {
     server.use(http.get(`${RAW}/owner/repo/:sha/package-lock.json`, () => HttpResponse.text('x'.repeat(2048))));
-    await expect(new GitHubRepoSource({ maxLockfileBytes: 1024 }).readLockfile(repo, SHA, signal())).rejects.toMatchObject({
+    await expect(
+      new GitHubRepoSource({ maxFileBytes: 1024 }).readFile(repo, SHA, 'package-lock.json', signal()),
+    ).rejects.toMatchObject({
       code: 'lockfile_too_large',
+      message: expect.stringMatching(/^package-lock.json is larger than/) as string,
       outcome: 'unsupported',
     });
   });
