@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Scan Review</title>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --fg: #1b1f24;
+        --muted: #59636e;
+        --line: #d8dee4;
+        --accent: #0b5cad;
+        --bad: #b42318;
+        --warn: #9a6700;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0f1216;
+          --fg: #e6edf3;
+          --muted: #9198a1;
+          --line: #30363d;
+          --accent: #4493f8;
+          --bad: #f85149;
+          --warn: #d29922;
+        }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+      main { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+      h1 { font-size: 22px; margin: 0 0 4px; }
+      .sub { color: var(--muted); margin: 0 0 20px; }
+      form { display: flex; gap: 8px; flex-wrap: wrap; }
+      input { flex: 1 1 320px; padding: 10px 12px; font: inherit; color: inherit; background: transparent;
+              border: 1px solid var(--line); border-radius: 6px; }
+      button { padding: 10px 16px; font: inherit; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+      button:disabled { opacity: 0.6; cursor: default; }
+      .error { color: var(--bad); margin-top: 8px; }
+      .status { margin-top: 20px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; }
+      .muted { color: var(--muted); }
+      table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px; }
+      th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--muted); font-weight: 600; }
+      .sev-critical, .sev-high, .mal { color: var(--bad); font-weight: 600; }
+      .sev-medium { color: var(--warn); }
+      a { color: var(--accent); }
+      code { font-size: 13px; }
+      .table-wrap { overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>AI Scan Review</h1>
+      <p class="sub">Paste a public GitHub repository URL to check its npm dependencies for known vulnerabilities.</p>
+      <form id="scan-form" novalidate>
+        <input id="repo-url" name="repoUrl" type="text" inputmode="url" autocomplete="off"
+               placeholder="https://github.com/owner/repo" aria-label="GitHub repository URL" required />
+        <button id="submit" type="submit">Scan</button>
+      </form>
+      <div id="form-error" class="error" role="alert"></div>
+      <section id="result" aria-live="polite"></section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

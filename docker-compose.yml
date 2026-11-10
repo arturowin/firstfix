@@ -1,4 +1,3 @@
-# M0: Postgres only. The api and worker services are added in M1.
 services:
   postgres:
     image: postgres:17-alpine
@@ -15,6 +14,47 @@ services:
       interval: 2s
       timeout: 3s
       retries: 20
+
+  # Applies migrations once, then exits; api and worker start only after it succeeds.
+  migrate:
+    build: .
+    command: ["node", "scripts/migrate.ts"]
+    environment:
+      DATABASE_URL: postgres://scan:scan@postgres:5432/scan
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    command: ["node", "src/api/main.ts"]
+    environment:
+      DATABASE_URL: postgres://scan:scan@postgres:5432/scan
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build: .
+    command: ["node", "src/worker/main.ts"]
+    environment:
+      DATABASE_URL: postgres://scan:scan@postgres:5432/scan
+      # Optional: raises GitHub's limit from 60 to 5000 requests/hour.
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      WORKER_CONCURRENCY: "2"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # Lets in-flight scans finish on `docker compose stop` (graceful timeout in the worker is 30 s).
+    stop_grace_period: 40s
 
 volumes:
   pgdata:

@@ -13,10 +13,11 @@
     "worker": "node src/worker/main.ts",
     "premigrate": "node scripts/check-node.mjs",
     "migrate": "node scripts/migrate.ts",
+    "build:web": "node scripts/build-web.ts",
     "pretest": "node scripts/check-node.mjs",
     "test": "vitest run",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p src/web"
   },
   "dependencies": {
     "fastify": "5.12.8",
