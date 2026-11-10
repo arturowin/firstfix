@@ -40,6 +40,8 @@ interface FindingJson {
 
 interface ActionVersionJson {
   installedVersion: string;
+  installedAs: string[];
+  directAs: string[];
   scope: Scope;
   isDirect: boolean;
   directParents: string[];
@@ -319,7 +321,7 @@ function actionCard(a: ActionJson, findings: FindingJson[]): HTMLElement {
     const f = findings.find((x) => x.ecosystem === a.ecosystem && x.package === a.package && x.installedVersion === v.installedVersion);
     const block = el('div', undefined, 'evidence-version');
     block.append(
-      el('div', `${a.package} ${v.installedVersion} · ${v.scope} · ${v.isDirect ? 'direct' : `via ${v.directParents.join(', ')}`}`, 'strong'),
+      el('div', [`${a.package} ${v.installedVersion}`, v.scope, ...routesOf(a.package, v)].join(' · '), 'strong'),
     );
     const paths = f?.installPaths ?? [];
     if (paths.length > 0) block.append(el('div', `Install path: ${paths.map((p) => p.join(' › ')).join('  |  ')}`, 'muted'));
@@ -346,6 +348,14 @@ function actionCard(a: ActionJson, findings: FindingJson[]): HTMLElement {
   }
   card.append(evidence);
   return card;
+}
+
+/** Every way this version is installed: each direct declaration (aliases named) and each parent. */
+function routesOf(pkg: string, v: ActionVersionJson): string[] {
+  const out: string[] = [];
+  if (v.directAs.length > 0) out.push(v.directAs.every((n) => n === pkg) ? 'direct' : `direct as ${v.directAs.join(', ')}`);
+  if (v.directParents.length > 0) out.push(`via ${v.directParents.join(', ')}`);
+  return out.length > 0 ? out : ['transitive'];
 }
 
 function labelled(label: string, text: string): HTMLElement {

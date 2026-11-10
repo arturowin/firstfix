@@ -12,6 +12,7 @@ function f(over: Partial<PlanFinding> & Pick<PlanFinding, 'package' | 'advisoryI
   return {
     ecosystem: 'npm',
     installedAs: [],
+    directAs: over.isDirect === false ? [] : [over.package],
     installedVersion: '1.0.0',
     scope: 'runtime',
     isDirect: true,
@@ -108,7 +109,8 @@ describe('grouping into actions', () => {
     });
     const text = describeAction(a ?? expect.fail(), npm.hints);
     expect(text.steps).toEqual([
-      'lib 4.2.0 (direct, runtime): candidate 5.0.0 addresses 3 of 4 advisories on 4.2.0 according to advisory data. `npm install lib@5.0.0`.',
+      'lib 4.2.0 (direct, runtime): candidate 5.0.0 addresses 3 of 4 advisories on 4.2.0 according to advisory data.',
+      '`npm install lib@5.0.0`.',
       '5.0.0 is a major-version jump from 4.2.0; 4.9.1 addresses 2 of 4 without one. Check the changelog before choosing.',
       'No fixed version published for D: review the advisory and upstream guidance, and assess your exposure (or replace the package).',
     ]);
@@ -168,18 +170,55 @@ describe('grouping into actions', () => {
       [f({ package: 'qs', installedVersion: '6.5.5', isDirect: false, directParents: ['request'], advisoryId: 'A', ...cand('6.5.6') })],
       scheme,
     );
-    expect(describeAction(a ?? expect.fail(), npm.hints).steps[0]).toBe(
-      'qs 6.5.5 (via request, runtime): candidate 6.5.6 addresses 1 of 1 advisory on 6.5.5 according to advisory data. Upgrade request to a version that pulls in qs 6.5.6 or later, or use an `overrides` entry in package.json.',
-    );
+    expect(describeAction(a ?? expect.fail(), npm.hints).steps).toEqual([
+      'qs 6.5.5 (via request, runtime): candidate 6.5.6 addresses 1 of 1 advisory on 6.5.5 according to advisory data.',
+      // Only the candidate was checked against the ranges: no "or later".
+      "Update request so it resolves to qs 6.5.6, or to another version checked against these advisories; if that isn't possible, use an `overrides` entry in package.json.",
+    ]);
   });
 
-  it('an aliased install is named, and its upgrade command keeps the alias', () => {
+  it('two direct aliases are two required updates, not alternatives (review reproduction)', () => {
     const [a] = buildFixPlan(
-      [f({ package: 'lodash', installedAs: ['lodash', 'my-lodash'], installedVersion: '4.17.20', advisoryId: 'A', ...cand('4.17.21') })],
+      [f({ package: 'lodash', installedAs: ['first', 'second'], directAs: ['first', 'second'], installedVersion: '4.17.20', advisoryId: 'A', ...cand('4.17.21') })],
+      scheme,
+    );
+    const steps = describeAction(a ?? expect.fail(), npm.hints).steps;
+    expect(steps).toEqual([
+      'lodash 4.17.20 (installed as first and second, direct as first and second, runtime): candidate 4.17.21 addresses 1 of 1 advisory on 4.17.20 according to advisory data.',
+      'Update every declaration (each is a separate install): `npm install first@npm:lodash@4.17.21` and `npm install second@npm:lodash@4.17.21`.',
+    ]);
+    expect(steps.join(' ')).not.toMatch(/` or `/);
+  });
+
+  it('direct and transitive installs of one version: both routes, the transitive alias gets no install command', () => {
+    const [a] = buildFixPlan(
+      [
+        f({
+          package: 'lodash',
+          installedAs: ['first', 'second'],
+          directAs: ['first'],
+          isDirect: true,
+          directParents: ['a'],
+          installedVersion: '4.17.20',
+          advisoryId: 'A',
+          ...cand('4.17.21'),
+        }),
+      ],
+      scheme,
+    );
+    expect(describeAction(a ?? expect.fail(), npm.hints).steps.slice(1)).toEqual([
+      '`npm install first@npm:lodash@4.17.21`.',
+      "It is also pulled in by a: update a so it resolves to lodash 4.17.21, or to another version checked against these advisories; if that isn't possible, use an `overrides` entry in package.json.",
+    ]);
+  });
+
+  it('malicious with several routes: every one has to go', () => {
+    const [a] = buildFixPlan(
+      [f({ package: 'evil', directAs: ['evil'], directParents: ['x'], advisoryId: 'MAL-1', isMalicious: true, severity: 'unknown' })],
       scheme,
     );
     expect(describeAction(a ?? expect.fail(), npm.hints).steps[0]).toBe(
-      'lodash 4.17.20 (installed as lodash and my-lodash, direct, runtime): candidate 4.17.21 addresses 1 of 1 advisory on 4.17.20 according to advisory data. `npm install lodash@4.17.21` or `npm install my-lodash@npm:lodash@4.17.21`.',
+      'evil 1.0.0 (direct, via x, runtime): remove it from your dependencies, and remove or replace x, which pulls it in.',
     );
   });
 

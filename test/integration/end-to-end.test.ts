@@ -122,7 +122,10 @@ describe('end to end: submit → worker → report', () => {
       [2, 'lodash', 'upgrade', true],
       [3, 'request', 'no_fix', true],
     ]);
-    expect(report?.actions[1]?.text?.steps[0]).toMatch(/candidate 4\.17\.21 .* `npm install lodash@4\.17\.21`/);
+    expect(report?.actions[1]?.text?.steps).toEqual([
+      'lodash 4.17.20 (direct, runtime): candidate 4.17.21 addresses 1 of 1 advisory on 4.17.20 according to advisory data.',
+      '`npm install lodash@4.17.21`.',
+    ]);
     expect(report?.findings[0]?.package).toBe('flatmap-stream'); // findings ranked too
     expect(report?.ciChecks).toEqual(['Dependabot alerts', '`npm audit` in CI']);
     expect(report?.agentPrompt).toContain(`at commit ${SHA}`);

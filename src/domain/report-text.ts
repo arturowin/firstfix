@@ -15,10 +15,33 @@ function list(items: readonly string[]): string {
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1] ?? ''}`;
 }
 
-function where(v: ActionVersion): string {
-  const alias = v.installedAs.length > 0 ? `installed as ${list(v.installedAs)}, ` : '';
-  const how = v.isDirect ? 'direct' : v.directParents.length > 0 ? `via ${list(v.directParents)}` : 'transitive';
-  return `${alias}${how}, ${v.scope}`;
+function where(v: ActionVersion, pkg: string): string {
+  const aliased = v.installedAs.length > 0;
+  const parts: string[] = [];
+  if (aliased) parts.push(`installed as ${list(v.installedAs)}`);
+  if (v.directAs.length > 0) parts.push(aliased || v.directAs.some((n) => n !== pkg) ? `direct as ${list(v.directAs)}` : 'direct');
+  if (v.directParents.length > 0) parts.push(`via ${list(v.directParents)}`);
+  if (v.directAs.length === 0 && v.directParents.length === 0) parts.push('transitive');
+  return `${parts.join(', ')}, ${v.scope}`;
+}
+
+/**
+ * Every route that has to change for this installed version. Direct declarations each need their own update
+ * (two aliases are two updates, not alternatives); transitive installs need their parents to resolve to a
+ * checked version. Only the candidate was checked against the advisory ranges, so nothing says "or later".
+ */
+function routes(pkg: string, v: ActionVersion & { candidate: CandidateStep }, hints: RemediationHints): string[] {
+  const out: string[] = [];
+  const commands = v.directAs.map((name) => `\`${hints.upgradeCommand(pkg, v.candidate.version, name)}\``);
+  if (commands.length === 1) out.push(`${commands[0] ?? ''}.`);
+  if (commands.length > 1) out.push(`Update every declaration (each is a separate install): ${list(commands)}.`);
+  if (v.directParents.length > 0) {
+    const lead = commands.length > 0 ? `It is also pulled in by ${list(v.directParents)}: update` : 'Update';
+    out.push(
+      `${lead} ${list(v.directParents)} so it resolves to ${pkg} ${v.candidate.version}, or to another version checked against these advisories; if that isn't possible, use ${hints.transitiveFix}.`,
+    );
+  }
+  return out;
 }
 
 export interface SummaryInput {
@@ -86,22 +109,21 @@ export interface ActionText {
 export function describeAction(a: Action, hints: RemediationHints): ActionText {
   const steps: string[] = [];
   for (const v of a.versions) {
-    const at = `${a.package} ${v.installedVersion} (${where(v)})`;
+    const at = `${a.package} ${v.installedVersion} (${where(v, a.package)})`;
     if (a.kind === 'remove_malicious') {
-      steps.push(
-        v.isDirect
-          ? `${at}: remove it from your dependencies.`
-          : `${at}: remove or replace ${list(v.directParents)}, which pulls it in.`,
-      );
+      // Every route has to go: each direct declaration and each parent that pulls it in.
+      const remove: string[] = [];
+      if (v.directAs.length > 0) {
+        remove.push(v.directAs.length === 1 ? 'remove it from your dependencies' : `remove every declaration of it (${list(v.directAs)})`);
+      }
+      if (v.directParents.length > 0) remove.push(`remove or replace ${list(v.directParents)}, which pulls it in`);
+      steps.push(`${at}: ${remove.length > 0 ? remove.join(', and ') : 'remove it'}.`);
       continue;
     }
     if (v.candidate) {
-      const route = v.isDirect
-        ? v.installedAs.length > 0
-          ? v.installedAs.map((alias) => `\`${hints.upgradeCommand(a.package, v.candidate?.version ?? '', alias)}\``).join(' or ')
-          : `\`${hints.upgradeCommand(a.package, v.candidate.version)}\``
-        : `upgrade ${list(v.directParents)} to a version that pulls in ${a.package} ${v.candidate.version} or later, or use ${hints.transitiveFix}`;
-      steps.push(`${at}: ${candidateText(v.installedVersion, v.candidate, v.advisories.length)}. ${capitalize(route)}.`);
+      const candidate = v.candidate;
+      steps.push(`${at}: ${candidateText(v.installedVersion, candidate, v.advisories.length)}.`);
+      steps.push(...routes(a.package, { ...v, candidate }, hints));
       if (v.candidate.majorJump) {
         steps.push(
           v.compatibleCandidate

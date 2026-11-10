@@ -73,7 +73,7 @@ describe('parseLockfile', () => {
     );
     expect(r).toEqual({
       kind: 'ok',
-      packages: [{ name: 'm', installedAs: [], version: '0.1.1', scope: 'runtime', isDirect: false, directParents: [], installPaths: [] }],
+      packages: [{ name: 'm', installedAs: [], directAs: [], version: '0.1.1', scope: 'runtime', isDirect: false, directParents: [], installPaths: [] }],
       uncheckable: [
         { name: 'f', version: '1.0.0', reason: 'unsupported_source' },
         { name: 'g', version: '1.0.0', reason: 'unsupported_source' },
@@ -125,9 +125,9 @@ describe('parseLockfile', () => {
     );
 
     it('queries the real package name, keeping the alias it is installed under', () => {
-      expect(r.kind === 'ok' && r.packages.map((p) => [p.name, p.version, p.installedAs, p.isDirect])).toEqual([
-        ['lodash', '4.17.20', ['my-lodash'], true],
-        ['lodash', '4.17.21', [], true],
+      expect(r.kind === 'ok' && r.packages.map((p) => [p.name, p.version, p.installedAs, p.directAs])).toEqual([
+        ['lodash', '4.17.20', ['my-lodash'], ['my-lodash']],
+        ['lodash', '4.17.21', [], ['lodash']],
       ]);
     });
 
@@ -139,7 +139,25 @@ describe('parseLockfile', () => {
           'node_modules/my-lodash': { name: 'lodash', version: '4.17.20', resolved: reg('lodash', '4.17.20') },
         }),
       );
-      expect(both.kind === 'ok' && both.packages).toMatchObject([{ name: 'lodash', installedAs: ['lodash', 'my-lodash'] }]);
+      expect(both.kind === 'ok' && both.packages).toMatchObject([
+        { name: 'lodash', installedAs: ['lodash', 'my-lodash'], directAs: ['lodash', 'my-lodash'] },
+      ]);
+    });
+
+    it('a transitive alias is not a direct declaration', () => {
+      const r2 = parseLockfile(
+        lock({
+          '': { dependencies: { first: 'npm:lodash@4.17.20', a: '1' } },
+          'node_modules/first': { name: 'lodash', version: '4.17.20', resolved: reg('lodash', '4.17.20') },
+          'node_modules/a': { version: '1.0.0', resolved: reg('a', '1.0.0'), dependencies: { second: 'npm:lodash@4.17.20' } },
+          'node_modules/a/node_modules/second': { name: 'lodash', version: '4.17.20', resolved: reg('lodash', '4.17.20') },
+        }),
+      );
+      expect(r2.kind === 'ok' && r2.packages.find((p) => p.name === 'lodash')).toMatchObject({
+        installedAs: ['first', 'second'],
+        directAs: ['first'],
+        directParents: ['a'],
+      });
     });
   });
 

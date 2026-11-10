@@ -82,13 +82,14 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
     const key = `${name}@${ver}`;
     let seen = byKey.get(key);
     if (!seen) {
-      seen = { name, installedAs: [], version: ver, scope, isDirect, directParents: [], installPaths: [], parentSet: new Set() };
+      seen = { name, installedAs: [], directAs: [], version: ver, scope, isDirect, directParents: [], installPaths: [], parentSet: new Set() };
       byKey.set(key, seen);
     } else {
       if (SCOPE_RANK[scope] > SCOPE_RANK[seen.scope]) seen.scope = scope;
       seen.isDirect ||= isDirect;
     }
     if (!seen.installedAs.includes(folderName)) seen.installedAs.push(folderName);
+    if (isDirect && !seen.directAs.includes(folderName)) seen.directAs.push(folderName);
     for (const p of reach?.parents ?? []) seen.parentSet.add(p);
     seen.installPaths.push(...(reach?.paths ?? []));
   }
@@ -97,6 +98,7 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
     ...p,
     // Only worth reporting when some install uses another name; then list every name, the real one included.
     installedAs: p.installedAs.every((n) => n === p.name) ? [] : p.installedAs.sort(),
+    directAs: p.directAs.sort(),
     directParents: [...parentSet].sort(),
     installPaths: shortestPaths(p.installPaths),
   }));

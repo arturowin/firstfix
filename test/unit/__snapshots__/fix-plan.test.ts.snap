@@ -28,13 +28,16 @@ Candidate versions come from advisory data. They are not confirmed fixes: compat
    - Check how it got in (lockfile history, the dependency that added it) and rotate secrets that were available where it was installed: CI, developer machines, servers.
    - Verify: \`npm ls flatmap-stream\` shows nothing, a rescan no longer lists it, and the exposed secrets were rotated.
 2. Upgrade qs 6.5.2 to candidate 6.5.3
-   - qs 6.5.2 (via request, runtime): candidate 6.5.3 addresses 1 of 1 advisory on 6.5.2 according to advisory data. Upgrade request to a version that pulls in qs 6.5.3 or later, or use an \`overrides\` entry in package.json.
+   - qs 6.5.2 (via request, runtime): candidate 6.5.3 addresses 1 of 1 advisory on 6.5.2 according to advisory data.
+   - Update request so it resolves to qs 6.5.3, or to another version checked against these advisories; if that isn't possible, use an \`overrides\` entry in package.json.
    - Verify: \`npm ls qs\` shows only the candidate version, your tests pass, and a rescan confirms which advisories remain.
 3. Upgrade lodash 4.17.20 to candidate 4.17.21
-   - lodash 4.17.20 (direct, runtime): candidate 4.17.21 addresses 1 of 1 advisory on 4.17.20 according to advisory data. \`npm install lodash@4.17.21\`.
+   - lodash 4.17.20 (direct, runtime): candidate 4.17.21 addresses 1 of 1 advisory on 4.17.20 according to advisory data.
+   - \`npm install lodash@4.17.21\`.
    - Verify: \`npm ls lodash\` shows only the candidate version, your tests pass, and a rescan confirms which advisories remain.
 4. Upgrade postcss 7.0.35 to candidate 8.4.31
-   - postcss 7.0.35 (direct, runtime): candidate 8.4.31 addresses 1 of 1 advisory on 7.0.35 according to advisory data. \`npm install postcss@8.4.31\`.
+   - postcss 7.0.35 (direct, runtime): candidate 8.4.31 addresses 1 of 1 advisory on 7.0.35 according to advisory data.
+   - \`npm install postcss@8.4.31\`.
    - 8.4.31 is a major-version jump from 7.0.35: check the changelog for breaking changes.
    - Verify: \`npm ls postcss\` shows only the candidate version, your tests pass, and a rescan confirms which advisories remain.
 5. No fixed version published for request

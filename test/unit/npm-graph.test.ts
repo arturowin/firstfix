@@ -38,6 +38,7 @@ describe('npm install graph', () => {
     expect(get(pkgs, 'shared', '1.0.0')).toEqual({
       name: 'shared',
       installedAs: [],
+      directAs: ['shared'],
       version: '1.0.0',
       scope: 'runtime',
       isDirect: true,

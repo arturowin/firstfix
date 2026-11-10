@@ -14,6 +14,8 @@ export interface PlanFinding {
   package: string;
   /** npm aliases etc.: the names the project uses for it, when they differ from `package`. */
   installedAs: string[];
+  /** Names the project declares it under directly; each declaration needs its own update. */
+  directAs: string[];
   installedVersion: string;
   scope: Scope;
   isDirect: boolean;
@@ -48,6 +50,8 @@ export interface CandidateStep {
 export interface ActionVersion {
   installedVersion: string;
   installedAs: string[];
+  /** Every direct declaration of this version (each needs updating); empty if only transitive. */
+  directAs: string[];
   scope: Scope;
   isDirect: boolean;
   directParents: string[];
@@ -179,6 +183,8 @@ function planVersion(installed: string, findings: PlanFinding[], scheme: Version
   return {
     installedVersion: installed,
     installedAs: first?.installedAs ?? [],
+    // Rows stored before direct_as existed: fall back to the package name when it was direct.
+    directAs: first && first.directAs.length > 0 ? first.directAs : first?.isDirect ? [first.package] : [],
     scope: first?.scope ?? 'runtime',
     isDirect: first?.isDirect ?? false,
     directParents: first?.directParents ?? [],

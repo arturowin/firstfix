@@ -37,6 +37,7 @@ export interface FindingInput {
   ecosystem: EcosystemId;
   package: string;
   installedAs: string[];
+  directAs: string[];
   installedVersion: string;
   scope: Scope;
   isDirect: boolean;
@@ -51,6 +52,7 @@ export interface FindingView {
   ecosystem: EcosystemId;
   package: string;
   installedAs: string[];
+  directAs: string[];
   installedVersion: string;
   scope: Scope;
   isDirect: boolean;

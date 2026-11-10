@@ -135,3 +135,18 @@ One entry per milestone (or per notable session). Keep it factual.
   migrations aren't edited, so ARCHITECTURE records it.
 - **Verified by:** 218 tests green (typecheck, lint). UI fixes are not covered by tests (no DOM test setup)
   and not yet checked in a browser.
+
+### 2026-11-10 · M2 second review fixes
+- **Review found (both confirmed):**
+  - P2: two direct aliases of one vulnerable version were offered as alternatives ("`…first…` or `…second…`").
+  - P2: transitive guidance said "candidate or later", which range-aware planning can't back.
+- **Agent did:**
+  - Each install name now keeps whether it is a direct declaration (`direct_as`, migration 006). Remediation
+    lists every route that has to change: each direct declaration, all required ("Update every declaration
+    …: A and B"), and each parent ("update X so it resolves to <pkg> <candidate>, or to another version
+    checked against these advisories").
+  - A transitive alias gets no install command.
+  - Broader than the review: a version installed both directly and through a parent now gets both routes
+    (before, only the direct one). The malicious path got the same "every route" treatment.
+- **Verified by:** 221 tests green (typecheck, lint); prompt snapshot diff reviewed (route moved to its own
+  line, "or later" gone). UI evidence line updated; not browser-checked.

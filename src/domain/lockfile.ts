@@ -13,6 +13,11 @@ export interface LockedPackage {
    * npm:lodash@4.17.20); empty when it is only installed under its own name.
    */
   installedAs: string[];
+  /**
+   * Names the project declares it under directly (root or workspace), sorted; each needs its own update.
+   * Usually [name]; two aliases give two entries; empty when only installed transitively.
+   */
+  directAs: string[];
   version: string;
   /** Most exposed scope across install locations: runtime > optional > dev. */
   scope: Scope;
