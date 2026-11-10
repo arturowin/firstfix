@@ -1,0 +1,53 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`coding-agent prompt > matches the template (snapshot) 1`] = `
+"You are working in https://github.com/arturowin/scan-review-demo at commit 2c18531000000000000000000000000000000000.
+A dependency scan of package-lock.json (advisory data: OSV.dev, 2026-11-10) found the issues below.
+Candidate versions come from advisory data. They are not confirmed fixes: compatibility, resolution and tests are still to verify.
+
+## Facts from the scan
+1. flatmap-stream (npm): KNOWN MALICIOUS
+   - installed 0.1.1, runtime, direct
+     - MAL-2025-20690 (unknown)
+2. qs (npm)
+   - installed 6.5.2, runtime, via request
+     - GHSA-hrpp-h998-j3pp (high)
+3. lodash (npm)
+   - installed 4.17.20, runtime, direct
+     - GHSA-29mw-wpgm-hmr9 (medium): ReDoS in lodash
+4. postcss (npm)
+   - installed 7.0.35, runtime, direct
+     - GHSA-7fh5-64p2-3v2j (medium)
+5. request (npm)
+   - installed 2.88.2, runtime, direct
+     - GHSA-p8p7-x288-28g6 (medium): Server-Side Request Forgery in Request
+
+## Candidate changes (verify each one)
+1. Remove flatmap-stream (known malicious package)
+   - flatmap-stream 0.1.1 (direct, runtime): remove it from your dependencies.
+   - Check how it got in (lockfile history, the dependency that added it) and rotate secrets that were available where it was installed: CI, developer machines, servers.
+   - Verify: \`npm ls flatmap-stream\` shows nothing, a rescan no longer lists it, and the exposed secrets were rotated.
+2. Upgrade qs 6.5.2 to candidate 6.5.3
+   - qs 6.5.2 (via request, runtime): candidate 6.5.3 addresses 1 of 1 advisory on 6.5.2 according to advisory data. Upgrade request to a version that depends on it, or use an \`overrides\` entry in package.json.
+   - Verify: \`npm ls qs\` shows only the candidate version, your tests pass, and a rescan confirms which advisories remain.
+3. Upgrade lodash 4.17.20 to candidate 4.17.21
+   - lodash 4.17.20 (direct, runtime): candidate 4.17.21 addresses 1 of 1 advisory on 4.17.20 according to advisory data. \`npm install lodash@4.17.21\`.
+   - Verify: \`npm ls lodash\` shows only the candidate version, your tests pass, and a rescan confirms which advisories remain.
+4. Upgrade postcss 7.0.35 to candidate 8.4.31
+   - postcss 7.0.35 (direct, runtime): candidate 8.4.31 addresses 1 of 1 advisory on 7.0.35 according to advisory data. \`npm install postcss@8.4.31\`.
+   - 8.4.31 is a major-version jump from 7.0.35: check the changelog for breaking changes.
+   - Verify: \`npm ls postcss\` shows only the candidate version, your tests pass, and a rescan confirms which advisories remain.
+5. No fixed version published for request
+   - request 2.88.2 (direct, runtime): no candidate version.
+   - No fixed version published for GHSA-p8p7-x288-28g6: review the advisory and upstream guidance, and assess your exposure (or replace the package).
+   - Verify: Rescan after any change, and re-check the advisory for a published fix.
+
+## How to work
+- Inspect the dependency graph first (e.g. \`npm ls <package>\`) to see what pulls each package in.
+- Change only what is listed here. Keep unrelated changes out of this work.
+- For a direct dependency, use \`npm install <package>@<version>\`. For a transitive one, upgrade the direct dependency that pulls it in; if that is not possible, use an \`overrides\` entry in package.json.
+- If a candidate is a major-version jump, stop and report before making that change.
+- Known malicious packages: remove them, do not upgrade them, and list the secrets that may have been exposed.
+- Run the test suite after the changes.
+- Rescan the repository afterwards. Report what is still unresolved, including advisories with no fixed version published."
+`;

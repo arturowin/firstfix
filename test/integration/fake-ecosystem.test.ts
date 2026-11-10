@@ -40,7 +40,12 @@ const fake: Ecosystem = {
   id: ECOSYSTEM,
   label: 'Fakeco',
   versionScheme: null, // no scheme: findings still reported, without candidates
-  hints: { upgradeCommand: (p, v) => `fake add ${p}==${v}`, ciChecks: ['fake audit'] },
+  hints: {
+    upgradeCommand: (p, v) => `fake add ${p}==${v}`,
+    inspectCommand: (p) => `fake why ${p}`,
+    transitiveFix: 'a fake constraint',
+    ciChecks: ['fake audit'],
+  },
 };
 
 const registry: EcosystemRegistry = {

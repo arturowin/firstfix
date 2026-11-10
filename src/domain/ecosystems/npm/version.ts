@@ -10,7 +10,8 @@ export const npmVersionScheme: VersionScheme = {
   compare: (a, b) => semver.compare(a, b),
 
   // ^ semantics: the leftmost non-zero part must stay the same (1.2→2.0, 0.3→0.4 and 0.0.3→0.0.4 are jumps).
-  isMajorJump: (from, to) => !semver.satisfies(to, `^${from}`, { includePrerelease: true }),
+  // Only moving up can be a jump.
+  isMajorJump: (from, to) => semver.gt(to, from) && !semver.satisfies(to, `^${from}`, { includePrerelease: true }),
 
   inRange(version, range) {
     const v = parse(version);

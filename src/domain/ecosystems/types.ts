@@ -19,6 +19,10 @@ export interface LockfileFormat {
 export interface RemediationHints {
   /** The command that moves a direct dependency to a version, e.g. `npm install lodash@4.17.21`. */
   upgradeCommand(pkg: string, version: string): string;
+  /** Shows what pulls a package in, e.g. `npm ls qs`. */
+  inspectCommand(pkg: string): string;
+  /** How to move a transitive package when its direct parent can't be upgraded, e.g. npm `overrides`. */
+  transitiveFix: string;
   /** CI checks suggested on a clean result. */
   ciChecks: readonly string[];
 }
@@ -28,7 +32,7 @@ export interface VersionScheme {
   isValid(version: string): boolean;
   /** Negative, zero or positive like Array.sort; only called with valid versions. */
   compare(a: string, b: string): number;
-  /** Moving from `from` to `to` leaves the range the ecosystem treats as compatible (npm: outside `^from`). */
+  /** Moving up from `from` to `to` leaves the range the ecosystem treats as compatible (npm: outside `^from`). */
   isMajorJump(from: string, to: string): boolean;
   inRange(version: string, range: AffectedRange): boolean;
 }

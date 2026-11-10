@@ -38,6 +38,7 @@ describe('npm version scheme', () => {
     ['0.3.1', '0.4.0', true], // 0.x: the minor is the leftmost non-zero part
     ['0.0.3', '0.0.4', true],
     ['4.17.20', '4.17.21', false],
+    ['6.5.5', '6.5.3', false], // a downgrade is never a jump
   ])('isMajorJump(%s → %s) = %s', (from, to, jump) => {
     expect(s.isMajorJump(from, to)).toBe(jump);
   });

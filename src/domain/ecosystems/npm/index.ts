@@ -7,6 +7,8 @@ export const npm: Ecosystem = {
   versionScheme: npmVersionScheme,
   hints: {
     upgradeCommand: (pkg, version) => `npm install ${pkg}@${version}`,
+    inspectCommand: (pkg) => `npm ls ${pkg}`,
+    transitiveFix: 'an `overrides` entry in package.json',
     ciChecks: ['Dependabot alerts', '`npm audit` in CI'],
   },
 };
