@@ -1,3 +1,5 @@
+import { SubmissionFlow } from './submission.ts';
+
 // Submit, follow progress, and show the report in the frozen layout (docs/ARCHITECTURE.md "Report layout"):
 // 1. summary + date + commit + coverage + advisory source, 2. up to three next actions, 3. evidence per action,
 // 4. all findings + unchecked dependencies, 5. coding-agent prompt preview / scan again.
@@ -126,36 +128,39 @@ async function api(path: string, init?: RequestInit): Promise<{ status: number; 
   return { status: res.status, body: await res.json().catch(() => null) };
 }
 
-// One key per intended submission: a double click or a retried request reuses it.
-let pending: { url: string; key: string } | null = null;
+// One Idempotency-Key per intended submission; retries reuse it (src/web/submission.ts).
+const submissions = new SubmissionFlow(
+  async (repoUrl, key) =>
+    api('/scans', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': key },
+      body: JSON.stringify({ repoUrl }),
+    }),
+  () => crypto.randomUUID(),
+);
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   void submit(input.value.trim());
 });
 
-async function submit(repoUrl: string, fresh = false): Promise<void> {
+/** Disables every submit control (the form button and any "Scan again") while a request is in flight. */
+function setSubmitting(on: boolean): void {
+  button.disabled = on;
+  for (const b of document.querySelectorAll<HTMLButtonElement>('button.scan-again')) b.disabled = on;
+}
+
+async function submit(repoUrl: string): Promise<void> {
+  if (submissions.busy) return;
   formError.textContent = '';
-  if (fresh || !pending || pending.url !== repoUrl) pending = { url: repoUrl, key: crypto.randomUUID() };
-  button.disabled = true;
-  try {
-    const res = await api('/scans', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'idempotency-key': pending.key },
-      body: JSON.stringify({ repoUrl }),
-    });
-    const body = (res.body ?? {}) as { scanId?: string; error?: { message: string } };
-    if ((res.status === 202 || res.status === 200) && body.scanId) {
-      pending = null;
-      history.pushState(null, '', `/scans/${body.scanId}`);
-      void follow(body.scanId);
-    } else {
-      formError.textContent = body.error?.message ?? `Request failed (${String(res.status)})`;
-    }
-  } catch {
-    formError.textContent = 'Could not reach the server. Try again.';
-  } finally {
-    button.disabled = false;
+  setSubmitting(true);
+  const outcome = await submissions.submit(repoUrl);
+  setSubmitting(false);
+  if (outcome.kind === 'accepted') {
+    history.pushState(null, '', `/scans/${outcome.scanId}`);
+    void follow(outcome.scanId);
+  } else if (outcome.kind === 'error') {
+    formError.textContent = outcome.message;
   }
 }
 
@@ -547,11 +552,14 @@ function promptSection(report: ReportJson): HTMLElement {
 }
 
 function scanAgainButton(scan: ScanJson): HTMLButtonElement {
-  const again = el('button', 'Scan again', 'secondary');
+  const again = el('button', 'Scan again', 'secondary scan-again');
   again.type = 'button';
+  again.disabled = submissions.busy;
   again.addEventListener('click', () => {
+    // Same flow as the form: a retry after a lost answer reuses the pending key; after a successful scan the
+    // pending submission is cleared, so a deliberate rescan gets a new key.
     input.value = scan.repo.url;
-    void submit(scan.repo.url, true);
+    void submit(scan.repo.url);
   });
   return again;
 }
