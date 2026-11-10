@@ -92,7 +92,10 @@ export function vulnDatabaseContract(provider: string, harness: ContractHarness)
         );
       const fixed = [{ kind: 'range', introduced: '4.0.0', fixed: '4.17.21', lastAffected: null }];
       expect(lookup.advisories.get('npm:lodash-es@4.17.20')?.[0]?.affectedRanges).toEqual(fixed);
-      expect(lookup.advisories.get('RubyGems:lodash-rails@4.17.20')?.[0]?.affectedRanges).toEqual(fixed);
+      // The RubyGems entry also lists its affected versions explicitly; both are kept.
+      expect(lookup.advisories.get('RubyGems:lodash-rails@4.17.20')?.[0]?.affectedRanges).toEqual(
+        expect.arrayContaining([...fixed, expect.objectContaining({ kind: 'versions' })]),
+      );
       // The advisory covers lodash-rails only on RubyGems: nothing applies to an npm package of that name.
       expect(lookup.advisories.get('npm:lodash-rails@4.17.20')?.[0]?.affectedRanges ?? []).toEqual([]);
     });

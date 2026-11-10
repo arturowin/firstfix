@@ -39,11 +39,15 @@ export function selectCandidate(
   let hits = containing(current);
   if (hits.length === 0) return UNKNOWN; // provider says affected but its ranges don't say why: don't guess
 
-  // Each step moves strictly upwards, so this ends after at most ranges.length steps.
+  // Each step moves strictly upwards, so this ends after at most ranges.length steps. Every version considered
+  // is checked against ranges AND explicit version lists; a list can say a version is affected but never what
+  // fixes it, so a candidate that a list still names is no candidate at all.
   for (let step = 0; step <= ranges.length; step++) {
+    const rangeHits = hits.filter((r) => r.kind === 'range');
+    if (rangeHits.length === 0) return NO_FIX; // only an explicit list affects it: no fix information
     let next: string | null = null;
-    for (const r of hits) {
-      if (r.kind === 'versions' || r.fixed === null || !scheme.isValid(r.fixed)) return NO_FIX;
+    for (const r of rangeHits) {
+      if (r.fixed === null || !scheme.isValid(r.fixed)) return NO_FIX;
       if (next === null || scheme.compare(r.fixed, next) > 0) next = r.fixed;
     }
     if (next === null || scheme.compare(next, current) <= 0) return NO_FIX;

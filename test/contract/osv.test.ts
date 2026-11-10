@@ -192,8 +192,10 @@ describe('OsvVulnDatabase', () => {
       { ecosystem: 'RubyGems', name: 'lodash-rails' },
       { ecosystem: 'npm', name: 'lodash-rails' },
     ]);
+    // The RubyGems entry also lists its affected versions explicitly; both are kept.
     expect(lookup.advisories.get('RubyGems:lodash-rails@4.17.20')?.[0]?.affectedRanges).toEqual([
       { kind: 'range', introduced: '4.0.0', fixed: '4.17.21', lastAffected: null },
+      { kind: 'versions', versions: expect.arrayContaining(['4.0.0', '4.17.15']) as string[] },
     ]);
     expect(lookup.advisories.get('npm:lodash-rails@4.17.20')?.[0]?.affectedRanges).toEqual([]);
   });

@@ -79,7 +79,13 @@ function neutralRanges(value: unknown): AffectedRange[] | null {
     if (typeof r !== 'object' || r === null) return false;
     const x = r as Record<string, unknown>;
     if (x['kind'] === 'versions') return Array.isArray(x['versions']) && x['versions'].every(str);
-    return x['kind'] === 'range' && str(x['introduced']) && strOrNull(x['fixed']) && strOrNull(x['lastAffected']);
+    return (
+      x['kind'] === 'range' &&
+      str(x['introduced']) &&
+      strOrNull(x['fixed']) &&
+      strOrNull(x['lastAffected']) &&
+      (x['limit'] === undefined || strOrNull(x['limit']))
+    );
   });
   return ok ? (value as AffectedRange[]) : null;
 }

@@ -21,6 +21,10 @@ export const npmVersionScheme: VersionScheme = {
       const lo = parse(range.introduced);
       if (!lo || v.compare(lo) < 0) return false;
     }
+    if (range.limit !== undefined && range.limit !== null) {
+      const limit = parse(range.limit);
+      if (!limit || v.compare(limit) >= 0) return false;
+    }
     if (range.fixed !== null) {
       const fixed = parse(range.fixed);
       return fixed !== null && v.compare(fixed) < 0;

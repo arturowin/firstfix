@@ -87,8 +87,8 @@ export function isMalicious(v: OsvVuln): boolean {
 
 /**
  * OSV events, in order, → ranges. Each `introduced` opens a range; the next `fixed` or `last_affected`
- * closes it; one left open affects every later version. `limit` is a search bound, not a fix: it closes the
- * range without a fixed version. GIT ranges (commit hashes) say nothing about package versions: skipped.
+ * closes it; one left open affects every later version. `limit` is an upper bound, not a fix: it closes the
+ * range with `limit` set and no fixed version. An explicit `versions` list is kept too, even next to ranges. GIT ranges (commit hashes) say nothing about package versions: skipped.
  */
 export function toRanges(entry: OsvAffected): AffectedRange[] {
   const out: AffectedRange[] = [];
@@ -99,15 +99,19 @@ export function toRanges(entry: OsvAffected): AffectedRange[] {
       if (e.introduced !== undefined) {
         if (open !== null) out.push({ kind: 'range', introduced: open, fixed: null, lastAffected: null });
         open = e.introduced;
-      } else if (open !== null && (e.fixed !== undefined || e.last_affected !== undefined || e.limit !== undefined)) {
+      } else if (open !== null && (e.fixed !== undefined || e.last_affected !== undefined)) {
         out.push({ kind: 'range', introduced: open, fixed: e.fixed ?? null, lastAffected: e.last_affected ?? null });
+        open = null;
+      } else if (open !== null && e.limit !== undefined) {
+        // A limit bounds the range but isn't a fix: keep the bound, leave the fix unknown.
+        out.push({ kind: 'range', introduced: open, fixed: null, lastAffected: null, limit: e.limit });
         open = null;
       }
     }
     if (open !== null) out.push({ kind: 'range', introduced: open, fixed: null, lastAffected: null });
   }
-  // Entries without usable ranges may list the affected versions explicitly.
-  if (out.length === 0 && entry.versions && entry.versions.length > 0) {
+  // OSV: a version is affected if it is in a range OR in the explicit list, so the list is kept alongside ranges.
+  if (entry.versions && entry.versions.length > 0) {
     out.push({ kind: 'versions', versions: [...entry.versions] });
   }
   return out;

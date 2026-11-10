@@ -40,6 +40,27 @@ describe('selectCandidate (AffectedRange only)', () => {
     expect(selectCandidate('4.17.20', [range('4.0.0', '4.17.21')], null)).toEqual({ status: 'unknown', version: null });
   });
 
+  it('a candidate the same advisory explicitly lists as affected is no candidate (review reproduction)', () => {
+    expect(pick('1.0.0', [range('0', '1.0.1'), { kind: 'versions', versions: ['1.0.0', '1.0.1'] }])).toEqual({
+      status: 'no_fix',
+      version: null,
+    });
+  });
+
+  it('a versions list consistent with the ranges doesn’t block the candidate', () => {
+    expect(pick('1.0.0', [range('0', '1.0.1'), { kind: 'versions', versions: ['0.9.0', '1.0.0'] }])).toEqual({
+      status: 'candidate',
+      version: '1.0.1',
+    });
+  });
+
+  it('a limit bounds the range: versions at or above it are not affected', () => {
+    const limited = { kind: 'range' as const, introduced: '2.0.0', fixed: null, lastAffected: null, limit: '3.0.0' };
+    expect(npmVersionScheme.inRange('2.5.0', limited)).toBe(true);
+    expect(npmVersionScheme.inRange('3.0.0', limited)).toBe(false);
+    expect(pick('2.5.0', [limited])).toEqual({ status: 'no_fix', version: null }); // a limit is not a fix
+  });
+
   it('a major jump is reported by the scheme, not hidden by selection', () => {
     const r = pick('2.5.0', [range('0', '3.0.0')]);
     expect(r).toEqual({ status: 'candidate', version: '3.0.0' });

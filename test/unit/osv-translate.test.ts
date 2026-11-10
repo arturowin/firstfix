@@ -52,10 +52,17 @@ describe('toRanges: OSV events → AffectedRange', () => {
     expect(r([{ introduced: '0' }])).toEqual([{ kind: 'range', introduced: '0', fixed: null, lastAffected: null }]);
   });
 
-  it('several ranges in one event list, and a limit is not a fix', () => {
+  it('several ranges in one event list; a limit keeps its upper bound but is not a fix', () => {
     expect(r([{ introduced: '1.0.0' }, { fixed: '1.2.0' }, { introduced: '2.0.0' }, { limit: '3.0.0' }])).toEqual([
       { kind: 'range', introduced: '1.0.0', fixed: '1.2.0', lastAffected: null },
-      { kind: 'range', introduced: '2.0.0', fixed: null, lastAffected: null },
+      { kind: 'range', introduced: '2.0.0', fixed: null, lastAffected: null, limit: '3.0.0' },
+    ]);
+  });
+
+  it('an explicit versions list is kept next to ranges (affected if in either)', () => {
+    expect(toRanges({ ranges: [{ type: 'SEMVER', events: [{ introduced: '0' }, { fixed: '1.0.1' }] }], versions: ['1.0.0', '1.0.1'] })).toEqual([
+      { kind: 'range', introduced: '0', fixed: '1.0.1', lastAffected: null },
+      { kind: 'versions', versions: ['1.0.0', '1.0.1'] },
     ]);
   });
 
