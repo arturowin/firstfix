@@ -31,6 +31,7 @@ function scanJson(s: ScanView) {
     repo: s.repo,
     commitSha: s.commitSha,
     lockfilePath: s.lockfilePath,
+    advisorySource: s.advisorySource,
     status: s.status,
     stage: s.stage,
     counts: s.counts,

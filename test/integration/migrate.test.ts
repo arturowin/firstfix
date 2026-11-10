@@ -239,7 +239,7 @@ describe('migration 002: ecosystem', () => {
     await pool.query(finding, [id]);
     await pool.query(`INSERT INTO unchecked_deps (scan_id, package, version, reason) VALUES ($1, 'g', '1.0.0', 'unsupported_source')`, [id]);
 
-    expect((await migrate(pool, MIGRATIONS)).applied).toEqual(['002_ecosystem.sql']);
+    expect((await migrate(pool, MIGRATIONS)).applied).toContain('002_ecosystem.sql');
 
     const f = await pool.query<{ ecosystem: string }>('SELECT ecosystem FROM findings WHERE scan_id = $1', [id]);
     const u = await pool.query<{ ecosystem: string }>('SELECT ecosystem FROM unchecked_deps WHERE scan_id = $1', [id]);

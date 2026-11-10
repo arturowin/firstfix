@@ -35,6 +35,7 @@ const advisory = (id: string): Advisory => ({
 
 function vulns(result: AdvisoryLookup | Error, onLookup?: () => Promise<void>): VulnDatabase {
   return {
+    source: { name: 'Test advisories', url: 'https://advisories.test' },
     lookup: async () => {
       await onLookup?.();
       if (result instanceof Error) throw result;
@@ -85,6 +86,7 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
       status: 'completed',
       commitSha: SHA,
       lockfilePath: 'package-lock.json',
+      advisorySource: 'Test advisories',
       coverage: 'full',
       counts: { totalDeps: 3, checkedDeps: 2, unsupportedDeps: 1, failedLookups: 0 },
     });

@@ -94,6 +94,7 @@ export class ScanPipeline {
     );
 
     const saved = await this.scans.complete(claim, {
+      advisorySource: this.vulns.source.name,
       counts: { totalDeps, checkedDeps: packages.length, unsupportedDeps: uncheckable.length, failedLookups: 0 },
       // "full" = every supported dependency in the root lockfile was checked (unsupported sources are listed
       // separately). Partial coverage from failed lookups arrives in M4.

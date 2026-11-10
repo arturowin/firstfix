@@ -229,8 +229,9 @@ OSV.dev is the only advisory source implemented. It sits behind the `VulnDatabas
   partial (per-package failures: M4; until then any failure is a `TransientError`). Errors follow
   `ports/errors.ts`: transient vs permanent, never provider HTTP codes.
 - **Neutral range type** (`src/domain/advisory.ts`, replaces the raw `affectedRanges: unknown[]`):
-  `AffectedRange { introduced: string; fixed: string | null; lastAffected: string | null }` plus an optional
-  explicit `versions: string[]`. `introduced: '0'` = all earlier versions; `fixed: null` = no fix published.
+  `AffectedRange = { kind: 'range'; introduced; fixed | null; lastAffected | null } | { kind: 'versions'; versions }`.
+  `introduced: '0'` = all earlier versions; `fixed: null` = no fix published; both `fixed` and `lastAffected`
+  null = every later version affected. `versions` is for provider entries that list versions and no range.
   Candidate selection, the major-jump flag and the stored `findings.affected_ranges` use only this type.
 - **The adapter owns all translation:** ecosystem names (ours are OSV's names; another adapter maps), range
   syntax (e.g. GitHub's `vulnerableVersionRange: "< 4.17.21"` + `firstPatchedVersion` → `AffectedRange`),
@@ -265,7 +266,12 @@ OSV.dev is the only advisory source implemented. It sits behind the `VulnDatabas
   - `MAL-` records (OpenSSF malicious-packages) have no `severity`, `aliases` or `references`, and a range
     `introduced: 0` with no fix. GitHub also publishes malware as `GHSA-*` ("Malicious Package in …",
     CRITICAL), often alongside the `MAL-` record for the same package; grouping by package keeps them in
-    one malicious action. The adapter sets `isMalicious` for `MAL-` ids.
+    one malicious action. The adapter sets `isMalicious` for `MAL-` ids and for advisories whose
+    `database_specific.cwe_ids` contains `CWE-506` (Embedded Malicious Code), which is how the recorded GitHub
+    malware advisories are tagged. Never from title text.
+  - The adapter turns events into `AffectedRange`s in order: each `introduced` opens a range, the next `fixed`
+    / `last_affected` closes it, one left open affects all later versions; `limit` closes without a fix; GIT
+    ranges are skipped. Severity labels are translated in the adapter (`src/adapters/osv/translate.ts`).
   - Unknown id → HTTP 404.
 - A package is reported as not checked if its batch query failed, or any of its advisory details couldn't
   be fetched. These feed `failed_lookups` and `unchecked_deps` (`lookup_failed`).

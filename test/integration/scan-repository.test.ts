@@ -27,6 +27,7 @@ describe('PostgresScanRepository: attempt ownership', () => {
   }
 
   const completion: Completion = {
+    advisorySource: 'OSV.dev',
     counts: { totalDeps: 3, checkedDeps: 2, unsupportedDeps: 1, failedLookups: 0 },
     coverage: 'full',
     findings: [
@@ -45,7 +46,7 @@ describe('PostgresScanRepository: attempt ownership', () => {
           title: 'ReDoS in lodash',
           severity: 'medium',
           isMalicious: false,
-          affectedRanges: [{ type: 'SEMVER', events: [{ introduced: '4.0.0' }, { fixed: '4.17.21' }] }],
+          affectedRanges: [{ kind: 'range', introduced: '4.0.0', fixed: '4.17.21', lastAffected: null }],
           references: [{ type: 'ADVISORY', url: 'https://example.com' }],
         },
       },

@@ -1,7 +1,7 @@
-import { isMaliciousId, severityFromLabel, type Advisory } from '../../domain/advisory.ts';
 import { TransientError } from '../../ports/errors.ts';
 import { packageKey, type AdvisoryLookup, type PackageRef, type VulnDatabase } from '../../ports/vuln-database.ts';
 import { fetchWithTimeout, USER_AGENT } from '../http.ts';
+import { toAdvisory, type OsvVuln } from './translate.ts';
 
 export interface OsvOptions {
   baseUrl?: string;
@@ -20,17 +20,10 @@ interface BatchResult {
   vulns?: { id: string }[];
   next_page_token?: string;
 }
-interface OsvVuln {
-  id: string;
-  summary?: string;
-  aliases?: string[];
-  references?: { type?: string; url?: string }[];
-  database_specific?: { severity?: unknown };
-  affected?: { package?: { ecosystem?: string; name?: string }; ranges?: unknown[] }[];
-}
 
 /** OSV.dev: querybatch for ids (chunked, paginated per query), then one detail call per unique id. */
 export class OsvVulnDatabase implements VulnDatabase {
+  readonly source = { name: 'OSV.dev', url: 'https://osv.dev' };
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly batchSize: number;
@@ -126,22 +119,6 @@ export class OsvVulnDatabase implements VulnDatabase {
     }
     return res;
   }
-}
-
-/** Only the parts of an OSV record that apply to this package (same ecosystem, exact name). */
-export function toAdvisory(v: OsvVuln, pkg: { ecosystem: string; name: string }): Advisory {
-  const ranges = (v.affected ?? [])
-    .filter((a) => a.package?.ecosystem === pkg.ecosystem && a.package.name === pkg.name)
-    .flatMap((a) => a.ranges ?? []);
-  return {
-    id: v.id,
-    aliases: v.aliases ?? [],
-    title: v.summary ?? null,
-    severity: severityFromLabel(v.database_specific?.severity),
-    isMalicious: isMaliciousId(v.id),
-    affectedRanges: ranges,
-    references: (v.references ?? []).flatMap((r) => (typeof r.url === 'string' ? [{ type: r.type ?? 'WEB', url: r.url }] : [])),
-  };
 }
 
 async function mapWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {

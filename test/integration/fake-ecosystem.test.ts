@@ -122,7 +122,7 @@ describe('a test-only ecosystem through the real pipeline', () => {
     ]);
     const ranges = await env.pool.query<{ affected_ranges: unknown }>('SELECT affected_ranges FROM findings WHERE scan_id = $1', [id]);
     // Only the Fakeco entry of the advisory applies, not the npm package of the same name.
-    expect(ranges.rows[0]?.affected_ranges).toEqual([{ type: 'ECOSYSTEM', events: [{ introduced: '0' }, { fixed: '1.3.0' }] }]);
+    expect(ranges.rows[0]?.affected_ranges).toEqual([{ kind: 'range', introduced: '0', fixed: '1.3.0', lastAffected: null }]);
     expect(report?.unchecked).toEqual([{ ecosystem: ECOSYSTEM, package: 'local', version: null, reason: 'unsupported_source' }]);
   });
 

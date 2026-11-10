@@ -18,6 +18,8 @@ export interface ScanView {
   commitSha: string | null;
   /** Which lockfile was scanned, relative to the repository root. */
   lockfilePath: string | null;
+  /** Name of the advisory data source used, e.g. "OSV.dev". */
+  advisorySource: string | null;
   status: ScanStatus;
   stage: ScanStage | null;
   counts: ScanCounts;
@@ -77,6 +79,7 @@ export interface ClaimedScan {
 }
 
 export interface Completion {
+  advisorySource: string;
   counts: ScanCounts;
   coverage: 'full' | 'partial';
   findings: FindingInput[];

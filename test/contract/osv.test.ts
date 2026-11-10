@@ -5,6 +5,7 @@ import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { OsvVulnDatabase } from '../../src/adapters/osv/vuln-database.ts';
 import { TransientError } from '../../src/ports/errors.ts';
+import { vulnDatabaseContract } from './vuln-database.contract.ts';
 
 const OSV = 'https://api.osv.dev';
 const FIXTURES = path.join(import.meta.dirname, '..', 'fixtures', 'osv');
@@ -84,15 +85,15 @@ describe('OsvVulnDatabase', () => {
         severity: 'medium', // MODERATE
         isMalicious: false,
         // only the `request` entry, not `@cypress/request` from the same advisory
-        affectedRanges: [{ type: 'SEMVER', events: [{ introduced: '0' }, { last_affected: '2.88.2' }] }],
+        affectedRanges: [{ kind: 'range', introduced: '0', fixed: null, lastAffected: '2.88.2' }],
         references: expect.arrayContaining([expect.objectContaining({ url: expect.stringMatching(/^https:/) as string })]) as unknown,
       },
     ]);
 
     const flatmap = lookup.get('npm:flatmap-stream@0.1.1') ?? [];
     expect(flatmap.map((a) => [a.id, a.severity, a.isMalicious]).sort()).toEqual([
-      ['GHSA-9x64-5r7x-2q53', 'critical', false],
-      ['GHSA-mh6f-8j2x-4483', 'critical', false],
+      ['GHSA-9x64-5r7x-2q53', 'critical', true], // CWE-506
+      ['GHSA-mh6f-8j2x-4483', 'critical', true], // CWE-506
       ['MAL-2025-20690', 'unknown', true],
     ]);
     expect(flatmap.find((a) => a.id === 'MAL-2025-20690')).toMatchObject({ aliases: [], references: [] });
@@ -193,7 +194,7 @@ describe('OsvVulnDatabase', () => {
       { ecosystem: 'npm', name: 'lodash-rails' },
     ]);
     expect(lookup.get('RubyGems:lodash-rails@4.17.20')?.[0]?.affectedRanges).toEqual([
-      { type: 'ECOSYSTEM', events: [{ introduced: '4.0.0' }, { fixed: '4.17.21' }] },
+      { kind: 'range', introduced: '4.0.0', fixed: '4.17.21', lastAffected: null },
     ]);
     expect(lookup.get('npm:lodash-rails@4.17.20')?.[0]?.affectedRanges).toEqual([]);
   });
@@ -224,4 +225,37 @@ describe('OsvVulnDatabase', () => {
   it('no packages → no calls', async () => {
     expect((await new OsvVulnDatabase().lookup([], signal())).size).toBe(0);
   });
+});
+
+vulnDatabaseContract('OSV.dev', {
+  create: () => new OsvVulnDatabase(),
+  serveRecorded(idsByPackage) {
+    server.use(
+      http.post(`${OSV}/v1/querybatch`, async ({ request }) => {
+        const { queries } = (await request.json()) as Batch;
+        return HttpResponse.json({
+          results: queries.map((q) => {
+            const ids = idsByPackage[`${q.package.ecosystem}:${q.package.name}@${q.version ?? ''}`];
+            return ids ? { vulns: ids.map((id) => ({ id, modified: '2026-01-01T00:00:00Z' })) } : {};
+          }),
+        });
+      }),
+      http.get(`${OSV}/v1/vulns/:id`, ({ params }) => HttpResponse.json(fixture(`${String(params['id'])}.json`))),
+    );
+  },
+  serveUnknownId(id) {
+    server.use(
+      http.post(`${OSV}/v1/querybatch`, async ({ request }) => {
+        const { queries } = (await request.json()) as Batch;
+        return HttpResponse.json({ results: queries.map(() => ({ vulns: [{ id }] })) });
+      }),
+      // Recorded: OSV answers an unknown id with 404.
+      http.get(`${OSV}/v1/vulns/:id`, () => HttpResponse.json({ code: 5, message: 'Bug not found.' }, { status: 404 })),
+    );
+  },
+  serveOutage(kind) {
+    server.use(
+      http.post(`${OSV}/v1/querybatch`, () => (kind === 'network' ? HttpResponse.error() : new HttpResponse(null, { status: 503 }))),
+    );
+  },
 });

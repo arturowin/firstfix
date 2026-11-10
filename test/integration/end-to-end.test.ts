@@ -88,6 +88,8 @@ describe('end to end: submit → worker → report', () => {
     expect(scan).toMatchObject({
       status: 'completed',
       commitSha: SHA,
+      lockfilePath: 'package-lock.json',
+      advisorySource: 'OSV.dev',
       coverage: 'full',
       counts: { totalDeps: 107, checkedDeps: 106, unsupportedDeps: 1, failedLookups: 0 },
     });
