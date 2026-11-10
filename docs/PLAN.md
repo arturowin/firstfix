@@ -38,6 +38,12 @@ Tests: URL normalization, idempotency (incl. 409), lockfile parser basics, one i
       - pipeline: try registered formats in order, store `lockfile_path`; error/UI copy derived from the registry
       - candidate selection, major-jump flag, agent-prompt command and clean-result CI hint (below) are written
         against the npm `VersionScheme` / remediation hints from the start
+- [ ] Then: provider-neutral advisory source (ARCHITECTURE.md "Advisory source"; OSV stays the only adapter, ~1 h)
+      - `AffectedRange` in `src/domain/advisory.ts` replaces raw `affectedRanges: unknown[]`; the OSV adapter converts
+        `introduced`/`fixed`/`last_affected` events into it; `findings.affected_ranges` stores the neutral shape
+      - the OSV adapter sets `isMalicious`; the domain no longer inspects `MAL-` ids
+      - shared `VulnDatabase` contract suite (`test/contract/vuln-database.contract.ts`), run by the OSV adapter test
+      - report names the advisory data source next to coverage
 - [ ] Only lockfileVersion 2/3 supported; others → `unsupported` with reason
 - [ ] Lockfile parsing rules from ARCHITECTURE.md (link, sources, dev/optional/devOptional, direct, dedupe, path aggregation)
 - [ ] OSV chunking (≤1000), pagination, detail fetch deduped with a concurrency limit, failed-lookup accounting
@@ -55,6 +61,8 @@ several advisories on one package, major jump), grouping, malicious path, prompt
 Ecosystem seams: a test-only fake ecosystem through the pipeline (GitHub + OSV mocked) with nothing outside the
 registry changed; OSV adapter passes the ecosystem through and filters `affected` by it; migration 002 keeps
 existing rows as `npm` and the unique key includes the ecosystem; all existing npm tests unchanged.
+Advisory source: OSV events → `AffectedRange` (fixed, last_affected, `introduced: 0`, versions-only entries);
+the OSV adapter passes the shared contract suite; candidate selection tests use only `AffectedRange`.
 
 ## If time runs short — cut in this order
 1. Shrink `npm run eval` to 3 fixtures
@@ -88,5 +96,6 @@ Never cut a test while keeping the claim it proves. If a guarantee isn't tested,
 - [ ] README: Product interpretation → Assumptions → Quick start (Docker and non-Docker) → Demo repo → Architecture → Decisions → Failure behavior → Limits → Next steps → How I used coding agents (from AGENT_LOG)
 - [ ] Demo fixture repo linked, with a warning not to `npm install` it; tested end to end; one real popular repo also tried
 - [ ] README Limits: no rate limit on POST /scans, worker concurrency, idempotency key retention, GHSA-only severity,
-      npm only (ecosystem seams ready; lockfile ecosystems vs resolve-first ones), one lockfile per scan
+      npm only (ecosystem seams ready; lockfile ecosystems vs resolve-first ones), one lockfile per scan,
+      one advisory source (OSV; provider contract ready)
 - [ ] Usability check: show the report to someone unfamiliar; ask what they'd do first and why, what was checked, what's uncertain. Fix confusion.

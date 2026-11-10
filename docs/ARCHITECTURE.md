@@ -20,9 +20,9 @@ Two processes share one PostgreSQL database.
 - **API** (`src/api/main.ts`): HTTP routes (zod, Idempotency-Key), `ScanService`, static UI.
   Uses ports `ScanRepository`, `JobQueue`.
 - **Worker** (`src/worker/main.ts`): `ScanPipeline` = claim → resolve SHA → find a supported lockfile @SHA →
-  parse with its ecosystem's format → OSV lookup → rank → build actions → explain → save. Uses ports `RepoSource`, `VulnDatabase`,
+  parse with its ecosystem's format → advisory lookup (OSV) → rank → build actions → explain → save. Uses ports `RepoSource`, `VulnDatabase`,
   `Explainer`, `ScanRepository`.
-- **Adapters**: GitHub REST API, OSV.dev, LLM (+ template fallback), Postgres, pg-boss.
+- **Adapters**: GitHub REST API, OSV.dev (the advisory source; see "Advisory source"), LLM (+ template fallback), Postgres, pg-boss.
 - Plain composition root per process; no DI framework. Contract tests show adapters are substitutable.
 
 ## Data model (sketch — refine in M1)
@@ -38,14 +38,15 @@ scans(id uuid pk,            -- also the pg-boss job id (send({ id })), same sub
       created_at, updated_at, completed_at null)
 
 findings(id pk, scan_id fk,
-         ecosystem,                -- OSV ecosystem name, 'npm' (M2, migration 002; in the unique key)
+         ecosystem,                -- canonical ecosystem id (OSV's naming), 'npm' (M2, migration 002; in the unique key)
          package, installed_version,
          scope,                    -- 'runtime' | 'optional' | 'dev' (most exposed path)
          is_direct bool,           -- true if any install path is direct
          direct_parents text[],    -- all direct deps that pull it in (empty if direct)
          install_paths jsonb,      -- e.g. [["express","body-parser","qs"]], capped
          advisory_id, aliases text[], severity, is_malicious bool,
-         title, affected_ranges jsonb, candidate_version null, references jsonb,
+         title, affected_ranges jsonb,   -- neutral AffectedRange[] (see "Advisory source"), not provider JSON
+         candidate_version null, references jsonb,
          explanation null)
 
 unchecked_deps(scan_id fk, ecosystem, package, version null, reason)   -- 'unsupported_source' | 'lookup_failed'
@@ -104,7 +105,7 @@ COMMIT;
   (attempt-guarded), then throws so pg-boss retries with backoff. The next claim sets `running` again.
 - Unrecoverable (repo not found/private, other 403) and `unsupported`: mark the scan (attempt-guarded),
   then **return normally — do not throw**, or pg-boss will retry a permanent failure.
-- Some OSV lookups fail → `completed`, coverage `partial`, failed ones in `unchecked_deps`.
+- Some advisory lookups fail → `completed`, coverage `partial`, failed ones in `unchecked_deps`.
 - All lookups fail → `failed`.
 - AI failure never fails a scan and never affects coverage.
 
@@ -159,13 +160,14 @@ Only npm is implemented. The ecosystem-specific parts sit behind small seams so 
 few pure modules plus a registry entry, not a rewrite. Everything else (ranking, malicious handling,
 attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
 
-- **Ecosystem id = OSV's ecosystem name** (`npm`, later e.g. `PyPI`, `crates.io`, `RubyGems`, `Go`,
-  `Packagist`, `NuGet`). No mapping table; the OSV adapter passes it through.
+- **Ecosystem id:** we use OSV's ecosystem names as our canonical ids (`npm`, later e.g. `PyPI`, `crates.io`,
+  `RubyGems`, `Go`, `Packagist`, `NuGet`). A naming choice, not a dependency: the OSV adapter passes them
+  through; another advisory source's adapter maps its own names.
 - **Lockfile format** (pure, `src/domain/ecosystems/`): `{ ecosystem, fileNames, parse(text) }`, returning the
   existing `ParseLockfileResult` with `ecosystem` on each package. A registry lists the supported formats in
   priority order; today only `package-lock.json`. A second format for the same ecosystem (`yarn.lock`,
   `pnpm-lock.yaml`) is another entry. Parsing does no I/O, so formats live in `domain/`, not behind a port.
-- **Version scheme** per ecosystem: `compare`, `isMajorJump`, `inRange(version, osvRange)`. npm uses `semver`.
+- **Version scheme** per ecosystem: `compare`, `isMajorJump`, `inRange(version, range: AffectedRange)`. npm uses `semver`.
   An ecosystem without a scheme still reports findings, but with no candidate version and no major-jump
   flag ("see the advisory for fixed versions"); never a guessed version.
 - **Remediation hints** per ecosystem (pure): the upgrade command for the agent prompt
@@ -178,7 +180,7 @@ attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
   stored in `scans.lockfile_path` and shown beside coverage.
 - **One lockfile per scan.** Scanning several (e.g. npm + Python in one repo) needs per-lockfile coverage;
   out of scope, stated in README.
-- **Lockfile ecosystems only.** OSV needs exact versions. Ecosystems with lockfiles (Cargo.lock, poetry.lock /
+- **Lockfile ecosystems only.** Advisory lookups need exact versions. Ecosystems with lockfiles (Cargo.lock, poetry.lock /
   uv.lock, Gemfile.lock, composer.lock, packages.lock.json, go.mod) fit these seams. Manifests with ranges and
   no lock (plain `requirements.txt`, Maven `pom.xml`) need dependency resolution first: a different problem.
 - **Proof:** a test-only fake ecosystem (own file name, parser, version scheme) goes through the pipeline with
@@ -210,12 +212,37 @@ attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
   reason `unsupported_source`.
 - Scope: `dev: true` or `devOptional: true` → dev; `optional: true` → optional (runtime); neither → runtime.
 - Direct = listed in the root package's `dependencies` / `devDependencies` / `optionalDependencies`.
-- Dedupe by `name@version` before querying OSV.
+- Dedupe by `name@version` before the advisory lookup.
 - Tolerate entries without `resolved`/`integrity`.
 - Finding granularity: one finding per `package@version` × advisory. Install paths are aggregated onto it
   (list of direct parents, `is_direct` true if any path is direct, scope = most exposed path).
 
-### OSV usage
+### Advisory source (OSV implemented; provider-neutral contract)
+OSV.dev is the only advisory source implemented. It sits behind the `VulnDatabase` port, so another provider
+(GitHub Advisory Database, OSS Index, Snyk, deps.dev, …) is a new adapter plus one line in
+`src/worker/main.ts`. Nothing outside `src/adapters/<provider>/` knows provider formats.
+
+- **Contract:** for each `{ ecosystem, name, version }` the source returns its advisories, each with:
+  `id`, `aliases`, `title`, `severity` (`critical|high|medium|low|unknown`), `isMalicious`, `affectedRanges`
+  (neutral type below), `references`. Packages it could not check are reported per package, so coverage can be
+  partial (per-package failures: M4; until then any failure is a `TransientError`). Errors follow
+  `ports/errors.ts`: transient vs permanent, never provider HTTP codes.
+- **Neutral range type** (`src/domain/advisory.ts`, replaces the raw `affectedRanges: unknown[]`):
+  `AffectedRange { introduced: string; fixed: string | null; lastAffected: string | null }` plus an optional
+  explicit `versions: string[]`. `introduced: '0'` = all earlier versions; `fixed: null` = no fix published.
+  Candidate selection, the major-jump flag and the stored `findings.affected_ranges` use only this type.
+- **The adapter owns all translation:** ecosystem names (ours are OSV's names; another adapter maps), range
+  syntax (e.g. GitHub's `vulnerableVersionRange: "< 4.17.21"` + `firstPatchedVersion` → `AffectedRange`),
+  severity labels (no label → `unknown`, shown, never hidden), and the malicious flag. The domain reads
+  `isMalicious`; it never inspects id prefixes from a provider.
+- **Shared contract tests:** one suite every `VulnDatabase` adapter must pass, run against recorded responses:
+  ranges normalised, malicious flagged, no-fix represented, unknown id handled, transient vs permanent errors
+  classified, ecosystem and exact-name filtering. A second provider is then proven, not claimed.
+- **Data source is named in the report** (e.g. "Advisory data: OSV.dev, fetched <date>"): providers differ in
+  coverage (another source may lack OpenSSF malicious-package records) and in severity labels.
+- Not planned: several sources at once (a composite adapter merging by id and aliases). Nothing above blocks it.
+
+### OSV adapter (the current advisory source)
 - `POST /v1/querybatch`: max 1000 queries per call → chunk. Results contain only `{ id, modified }` per vuln
   and may be paginated per query (`next_page_token`) → follow it. A package with no vulns returns `{}`.
   Pagination (verified, fixtures `pagination.*`): only a query with more than 1000 vulns gets a token, on its
@@ -231,20 +258,21 @@ attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
     contains the installed version.
   - Range events are `introduced` (may be `"0"`), `fixed`, or `last_affected`. `last_affected` or a
     missing `fixed` means no fix published. Some entries have only an explicit `versions` list and no ranges.
+    The adapter turns each introduced/fixed or introduced/last_affected pair into one `AffectedRange`.
   - Severity label: `database_specific.severity` = `CRITICAL | HIGH | MODERATE | LOW` (MODERATE → medium).
     `severity[]` holds CVSS vectors only.
   - `MAL-` records (OpenSSF malicious-packages) have no `severity`, `aliases` or `references`, and a range
     `introduced: 0` with no fix. GitHub also publishes malware as `GHSA-*` ("Malicious Package in …",
     CRITICAL), often alongside the `MAL-` record for the same package; grouping by package keeps them in
-    one malicious action.
+    one malicious action. The adapter sets `isMalicious` for `MAL-` ids.
   - Unknown id → HTTP 404.
-- A package counts as `lookup_failed` if its batch query failed, or any of its advisory details couldn't
-  be fetched. These feed `failed_lookups` and `unchecked_deps`.
+- A package is reported as not checked if its batch query failed, or any of its advisory details couldn't
+  be fetched. These feed `failed_lookups` and `unchecked_deps` (`lookup_failed`).
 - Severity: GHSA label from `database_specific.severity` when present; otherwise `unknown` (labelled).
   No CVSS parsing in this version (stated as next step).
 
 ### Ranking policy (deterministic)
-1. Known malicious packages first (OSV `MAL-` advisories). Action: remove and rotate secrets, not upgrade.
+1. Known malicious packages first (advisories with `isMalicious`; with OSV, the `MAL-` records). Action: remove and rotate secrets, not upgrade.
 2. Severity: critical › high › medium › low › unknown (labelled, never hidden).
 3. Tie-breakers: runtime before dev; direct before transitive.
 Fix information shapes the action, not the rank.
@@ -261,7 +289,7 @@ Fix information shapes the action, not the rank.
   crosses a major version while a lower candidate would fix some advisories, show both ("4.x fixes 2 of 3;
   5.x needed for the third") and flag the major jump. Advisories with no fix are listed in the action
   as unresolved by any upgrade.
-- Malicious (`MAL-`) entries usually have no ranges or fix: separate path, action "remove the package,
+- Malicious entries usually have no ranges or fix: separate path, action "remove the package,
   check how it got in, rotate secrets that were available where it was installed".
 
 ### Evidence vs AI text
@@ -277,7 +305,7 @@ use the ecosystem's upgrade command (npm: `npm install <pkg>@<version>`), stop a
 unresolved items. User sees a preview before copying.
 
 ## Report layout (frozen order)
-1. Summary line + scan date + commit + coverage (coverage always beside the summary)
+1. Summary line + scan date + commit + coverage + advisory data source (coverage always beside the summary)
 2. Up to three recommended next actions: what, why first, how to verify
 3. Evidence: expandable per action
 4. All findings + unchecked dependencies
@@ -301,3 +329,5 @@ Never says "secure". Partial clean is never shown as clean overall.
 - Public github.com repos only; root `package-lock.json` only (npm is the only implemented ecosystem; the
   seams for others are described under "Ecosystems").
 - One lockfile per scan; manifests without a lockfile (ranges, no exact versions) are not supported.
+- One advisory source (OSV.dev); findings reflect its coverage. Other sources fit the contract under
+  "Advisory source" but are not implemented.
