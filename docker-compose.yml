@@ -67,6 +67,9 @@ services:
         condition: service_completed_successfully
     # Lets in-flight scans finish on `docker compose stop` (graceful timeout in the worker is 30 s).
     stop_grace_period: 40s
+    # If the worker exits unexpectedly, Docker brings it back; its unfinished job (kept in Postgres by
+    # pg-boss) is retried once the heartbeat lapses, without a new submission. `docker compose stop` still stops it.
+    restart: unless-stopped
 
 volumes:
   pgdata:
