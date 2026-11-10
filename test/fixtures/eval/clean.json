@@ -1,0 +1,8 @@
+{
+  "name": "clean",
+  "description": "Nothing found in 42 checked dependencies: the explainer is not called; template wording only.",
+  "repo": "example/clean",
+  "checkedDeps": 42,
+  "totalDeps": 42,
+  "findings": []
+}

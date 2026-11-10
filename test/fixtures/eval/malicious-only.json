@@ -1,0 +1,61 @@
+{
+  "name": "malicious-only",
+  "description": "A single malicious transitive package with no fix: the text must not suggest upgrading.",
+  "repo": "example/mal",
+  "checkedDeps": 15,
+  "totalDeps": 15,
+  "findings": [
+    {
+      "ecosystem": "npm",
+      "installedAs": [],
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "nodemon"
+      ],
+      "isMalicious": true,
+      "title": null,
+      "package": "event-stream",
+      "directAs": [],
+      "installedVersion": "3.3.6",
+      "advisoryId": "MAL-2025-1",
+      "severity": "unknown",
+      "candidateVersion": null,
+      "fixStatus": "no_fix",
+      "affectedRanges": [
+        {
+          "kind": "versions",
+          "versions": [
+            "3.3.6"
+          ]
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "installedAs": [],
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "nodemon"
+      ],
+      "isMalicious": true,
+      "title": "Critical severity vulnerability that affects event-stream and flatmap-stream",
+      "package": "event-stream",
+      "directAs": [],
+      "installedVersion": "3.3.6",
+      "advisoryId": "GHSA-mh6f-8j2x-4483",
+      "severity": "critical",
+      "candidateVersion": "4.0.0",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "introduced": "3.3.6",
+          "fixed": "4.0.0",
+          "lastAffected": null
+        }
+      ]
+    }
+  ]
+}

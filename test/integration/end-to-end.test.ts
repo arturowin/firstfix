@@ -138,7 +138,7 @@ describe('end to end: submit → worker → report', () => {
     expect(report?.agentPrompt).toContain(`at commit ${SHA}`);
 
     // AI failed → template prose, labelled, for the summary and every action; stored with the scan.
-    expect(report?.explanation).toMatchObject({ source: 'template', text: expect.stringMatching(/^Start with the known malicious package/) as string });
+    expect(report?.explanation).toMatchObject({ source: 'template', text: expect.stringMatching(/^Start with flatmap-stream, a known malicious package/) as string });
     expect(report?.actions.every((a) => a.whyItMatters?.source === 'template')).toBe(true);
     const row = await env.pool.query<{ explanation_source: string; explanation: { fallbackReason?: string } }>(
       'SELECT explanation_source, explanation FROM scans WHERE id = $1',
