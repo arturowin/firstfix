@@ -246,6 +246,10 @@ attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
   every direct parent and the shortest path from each; paths are capped at 5 per package version.
 - Dedupe by `name@version` before the advisory lookup.
 - Tolerate entries without `resolved`/`integrity`.
+- Package names and aliases must be valid npm names (`src/domain/ecosystems/npm/name.ts`): they come from a
+  repository-controlled file and end up in suggested commands. Invalid ones are set aside as `invalid_name`
+  (migration 008): not looked up, not a parent, not in paths, no command. Command builders validate names and
+  versions again and return no command rather than an unvalidated one (review finding).
 - Finding granularity: one finding per `package@version` × advisory. Install paths are aggregated onto it
   (list of direct parents, `is_direct` true if any path is direct, scope = most exposed path).
 
@@ -354,8 +358,11 @@ Fix information shapes the action, not the rank.
 - Every explainer's output, the template's included, passes `checkExplanation` (`src/domain/explanation.ts`):
   exactly the expected action IDs (`<ecosystem>:<package>`); each action's text may use only **that action's**
   versions and advisory IDs (the summary may use any action's); length limits; no "secure"/"safe"/"guarantee"/
-  "fixed" ("no fixed version published" allowed). Package names are masked before checking, so `safe-buffer` is
+  "fixed" ("no fixed version published" allowed); no links, domains or commands; nothing asking to send, upload
+  or share secrets, tokens or environment data. Package names are masked before checking, so `safe-buffer` is
   an identifier, not a claim. Prose truth can't be validated (stated in README).
+- AI prose stays in the human-facing report. The coding-agent prompt is template-only: an agent acts on it,
+  so model text there would be an injection path (review finding; reverted `ef17a53`).
 - The template bounds its own length (package names are unbounded) and describes lockfile scope only: "Marked as
   a runtime/development dependency in the lockfile; … wasn't assessed". If the template still fails the check
   or throws, fixed minimal sentences that name nothing stand in, with the reason stored. Explanation problems

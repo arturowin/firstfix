@@ -222,6 +222,18 @@ describe('grouping into actions', () => {
     );
   });
 
+  it('a version that fails validation gets no command, only a by-hand step', () => {
+    const [a] = buildFixPlan([f({ package: 'lodash', advisoryId: 'A', ...cand('4.17.21;id') })], () => ({
+      ...npmVersionScheme,
+      isValid: () => true,
+      compare: () => 0,
+      isMajorJump: () => false,
+    }));
+    const steps = describeAction(a ?? expect.fail(), npm.hints).steps.join('\n');
+    expect(steps).toContain('by hand: no command is generated for this name');
+    expect(steps).not.toContain('npm install');
+  });
+
   it('package names keep their case in headlines', () => {
     const [a] = buildFixPlan([f({ package: 'request', advisoryId: 'A' })], scheme);
     expect(describeAction(a ?? expect.fail(), npm.hints).headline).toBe('No fixed version published for request');

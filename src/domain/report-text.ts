@@ -32,7 +32,12 @@ function where(v: ActionVersion, pkg: string): string {
  */
 function routes(pkg: string, v: ActionVersion & { candidate: CandidateStep }, hints: RemediationHints): string[] {
   const out: string[] = [];
-  const commands = v.directAs.map((name) => `\`${hints.upgradeCommand(pkg, v.candidate.version, name)}\``);
+  const built = v.directAs.map((name) => hints.upgradeCommand(pkg, v.candidate.version, name));
+  // A name or version that failed validation gets no command at all (never a partially trusted one).
+  if (built.some((c) => c === null)) {
+    out.push(`Update its declaration to ${v.candidate.version} by hand: no command is generated for this name.`);
+  }
+  const commands = built.flatMap((c) => (c === null ? [] : [`\`${c}\``]));
   if (commands.length === 1) out.push(`${commands[0] ?? ''}.`);
   if (commands.length > 1) out.push(`Update every declaration (each is a separate install): ${list(commands)}.`);
   if (v.directParents.length > 0) {
@@ -172,7 +177,8 @@ function whyFirst(a: Action): string {
 }
 
 function verify(a: Action, hints: RemediationHints): string {
-  const inspect = `\`${hints.inspectCommand(a.package)}\``;
+  const cmd = hints.inspectCommand(a.package);
+  const inspect = cmd === null ? 'The dependency tree' : `\`${cmd}\``;
   switch (a.kind) {
     case 'remove_malicious':
       return `${inspect} shows nothing, a rescan no longer lists it, and the exposed secrets were rotated.`;

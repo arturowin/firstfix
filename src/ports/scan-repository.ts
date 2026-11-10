@@ -77,7 +77,7 @@ export interface UncheckedView {
   ecosystem: EcosystemId;
   package: string;
   version: string | null;
-  reason: 'unsupported_source' | 'lookup_failed';
+  reason: 'unsupported_source' | 'lookup_failed' | 'invalid_name';
 }
 
 export interface ReportData {

@@ -5,6 +5,7 @@
 import { MAX_INSTALL_PATHS, type LockedPackage, type ParseLockfileResult, type Scope, type UncheckablePackage } from '../../lockfile.ts';
 import type { LockfileFormat } from '../types.ts';
 import { buildInstallGraph } from './graph.ts';
+import { isValidNpmName } from './name.ts';
 
 const NPM_REGISTRY = 'https://registry.npmjs.org/';
 const SCOPE_RANK: Record<Scope, number> = { runtime: 2, optional: 1, dev: 0 };
@@ -70,6 +71,15 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
     const name = typeof entry.name === 'string' && entry.name !== '' ? entry.name : folderName;
     const ver = typeof entry.version === 'string' ? entry.version : null;
 
+    // Names come from a repository-controlled file and end up in commands: anything the registry couldn't hold
+    // (spaces, `;`, `$(`, quotes, …) is set aside unchecked, never looked up or put into a command.
+    if (!isValidNpmName(name) || !isValidNpmName(folderName)) {
+      const shown = (isValidNpmName(name) ? folderName : name).slice(0, 214);
+      const k = `invalid:${shown}@${ver ?? ''}`;
+      if (!uncheckable.has(k)) uncheckable.set(k, { name: shown, version: ver, reason: 'invalid_name' });
+      continue;
+    }
+
     if (!isSupportedSource(entry.resolved) || ver === null) {
       const k = `${name}@${ver ?? ''}`;
       if (!uncheckable.has(k)) uncheckable.set(k, { name, version: ver, reason: 'unsupported_source' });
@@ -90,8 +100,8 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
     }
     if (!seen.installedAs.includes(folderName)) seen.installedAs.push(folderName);
     if (isDirect && !seen.directAs.includes(folderName)) seen.directAs.push(folderName);
-    for (const p of reach?.parents ?? []) seen.parentSet.add(p);
-    seen.installPaths.push(...(reach?.paths ?? []));
+    for (const p of reach?.parents ?? []) if (isValidNpmName(p)) seen.parentSet.add(p);
+    seen.installPaths.push(...(reach?.paths ?? []).filter((p) => p.every(isValidNpmName)));
   }
 
   const packagesOut: LockedPackage[] = [...byKey.values()].map(({ parentSet, ...p }) => ({

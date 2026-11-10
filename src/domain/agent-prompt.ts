@@ -53,11 +53,11 @@ export function buildAgentPrompt(input: PromptInput): string | null {
     ...(hidden > 0 ? ['', `${String(hidden)} more ${hidden === 1 ? 'package is' : 'packages are'} in the full report; handle the ones above first.`] : []),
     '',
     '## How to work',
-    `- Inspect the dependency graph first${anyHints ? ` (e.g. \`${anyHints.inspectCommand('<package>')}\`)` : ''} to see what pulls each package in.`,
+    `- Inspect the dependency graph first${anyHints ? ` (e.g. \`${anyHints.inspectTemplate}\`)` : ''} to see what pulls each package in.`,
     '- Change only what is listed here. Keep unrelated changes out of this work.',
     ...(anyHints
       ? [
-          `- For a direct dependency, use \`${anyHints.upgradeCommand('<package>', '<version>')}\`. For a transitive one, upgrade the direct dependency that pulls it in; if that is not possible, use ${anyHints.transitiveFix}.`,
+          `- For a direct dependency, use \`${anyHints.upgradeTemplate}\`. For a transitive one, upgrade the direct dependency that pulls it in; if that is not possible, use ${anyHints.transitiveFix}.`,
         ]
       : []),
     '- If a candidate is a major-version jump, stop and report before making that change.',

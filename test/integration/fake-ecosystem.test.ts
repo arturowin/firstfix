@@ -43,6 +43,8 @@ const fake: Ecosystem = {
   hints: {
     upgradeCommand: (p, v) => `fake add ${p}==${v}`,
     inspectCommand: (p) => `fake why ${p}`,
+    upgradeTemplate: 'fake add <package>==<version>',
+    inspectTemplate: 'fake why <package>',
     transitiveFix: 'a fake constraint',
     ciChecks: ['fake audit'],
   },

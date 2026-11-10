@@ -74,7 +74,7 @@ interface ReportJson {
   ciChecks: string[];
   actions: ActionJson[];
   findings: FindingJson[];
-  unchecked: { ecosystem: string; package: string; version: string | null; reason: 'unsupported_source' | 'lookup_failed' }[];
+  unchecked: { ecosystem: string; package: string; version: string | null; reason: 'unsupported_source' | 'lookup_failed' | 'invalid_name' }[];
   agentPrompt: string | null;
 }
 
@@ -319,6 +319,10 @@ function summaryCard(report: ReportJson): HTMLElement {
   if (lookupFailed.length > 0) {
     box.append(el('p', `Not checked, advisory lookup failed (temporary): ${names(lookupFailed)}. Scan again to check them.`, 'muted'));
   }
+  const invalid = report.unchecked.filter((u) => u.reason === 'invalid_name');
+  if (invalid.length > 0) {
+    box.append(el('p', `Not checked, not a valid npm package name: ${String(invalid.length)}. Review them by hand; see below.`, 'error'));
+  }
   return box;
 }
 
@@ -479,6 +483,12 @@ const UNCHECKED_GROUPS: { reason: Unchecked['reason']; title: string; advice: st
     reason: 'lookup_failed',
     title: 'Advisory lookup failed',
     advice: 'Registry packages the advisory source could not be asked about this time. This is usually temporary: scan again to check them.',
+  },
+  {
+    reason: 'invalid_name',
+    title: 'Not a valid npm package name',
+    advice:
+      'The lockfile names these with characters no registry package can have (spaces, quotes, shell syntax). They were not checked and no command is generated for them. Treat them as suspicious and review the lockfile by hand.',
   },
   {
     reason: 'unsupported_source',

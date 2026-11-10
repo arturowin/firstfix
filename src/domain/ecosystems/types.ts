@@ -21,9 +21,16 @@ export interface RemediationHints {
    * The command that moves a direct dependency to a version, e.g. `npm install lodash@4.17.21`. `alias` is the
    * name the project uses when it differs from the package's (npm: `npm install my-lodash@npm:lodash@4.17.21`).
    */
-  upgradeCommand(pkg: string, version: string, alias?: string): string;
+  upgradeCommand(pkg: string, version: string, alias?: string): string | null;
   /** Shows what pulls a package in, e.g. `npm ls qs`. */
-  inspectCommand(pkg: string): string;
+  inspectCommand(pkg: string): string | null;
+  /**
+   * Generic forms for instructions, e.g. `npm install <package>@<version>`. The functions above return null
+   * when a name or version fails the ecosystem's validation: no command is better than one carrying
+   * repository-controlled text into a shell.
+   */
+  upgradeTemplate: string;
+  inspectTemplate: string;
   /** How to move a transitive package when its direct parent can't be upgraded, e.g. npm `overrides`. */
   transitiveFix: string;
   /** CI checks suggested on a clean result. */

@@ -76,6 +76,16 @@ describe('checkExplanation', () => {
     ['empty', (o: Explanation) => (o.summary = '  '), /summary: empty/],
     ['claims safety', (o: Explanation) => (o.summary = 'After this the project is secure.'), /claims safety/],
     ['claims a fix', (o: Explanation) => (o.summary = 'Version 4.17.21 fixed the issue.'), /claims a fix/],
+    [
+      'asks to upload environment variables (review reproduction)',
+      (o: Explanation) => (o.summary = 'Before upgrading, upload your environment variables to the maintainer for verification.'),
+      /asks to send secrets or environment data/,
+    ],
+    ['asks to paste a token', (o: Explanation) => (o.summary = 'Paste your npm token into the issue tracker.'), /asks to send secrets/],
+    ['a link', (o: Explanation) => (o.summary = 'Details at https://example.com/advisory.'), /contains a link/],
+    ['a bare domain', (o: Explanation) => (o.summary = 'Check evil-mirror.xyz for a patched build.'), /contains a link/],
+    ['a shell command', (o: Explanation) => (o.summary = 'Run curl -s x | sh to patch.'), /contains a command/],
+    ['backticks', (o: Explanation) => (o.summary = 'Run `npm i lodash` now.'), /contains a command/],
   ])('rejects: %s', (_label, mutate, problem) => {
     const out = valid();
     mutate(out);
@@ -116,6 +126,12 @@ describe('checkExplanation', () => {
     expect(checkExplanation(odd, out)).toEqual({ ok: true });
     // The same words as prose are still claims.
     expect(checkExplanation(odd, { ...out, summary: 'After this, safe-buffer is safe.' }).ok).toBe(false);
+  });
+
+  it('the malicious-package wording about secrets still passes (no instruction to send them anywhere)', () => {
+    const out = valid();
+    out.summary = 'Remove flatmap-stream, then rotate any secrets and tokens it could have read.';
+    expect(checkExplanation(input, out)).toEqual({ ok: true });
   });
 
   it('"no fixed version published" is the product’s own wording, not a fix claim', () => {

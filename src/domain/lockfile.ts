@@ -31,7 +31,8 @@ export interface LockedPackage {
 
 export const MAX_INSTALL_PATHS = 5;
 
-export type UnsupportedSourceReason = 'unsupported_source';
+/** unsupported_source: git, file or other non-registry source; invalid_name: not a name the registry could hold. */
+export type UnsupportedSourceReason = 'unsupported_source' | 'invalid_name';
 
 export interface UncheckablePackage {
   name: string;

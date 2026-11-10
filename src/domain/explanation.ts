@@ -123,6 +123,14 @@ const ADVISORY_ID = /\b(?:GHSA(?:-[0-9a-z]{4}){3}|CVE-\d{4}-\d{4,}|MAL-\d{4}-\d+
 const BANNED: [RegExp, string][] = [
   [/\b(?:secure|safe|safely|guarantee[sd]?)\b/i, 'claims safety or a guarantee'],
   [/\b(?:fixed|fixes)\b/i, 'claims a fix (only candidates exist; a rescan confirms)'],
+  // Prose explains; it never instructs anyone to run, fetch or send anything. Commands in the report are
+  // template-built from validated names; anything like one in AI text is a sign of injected instructions.
+  [/\bhttps?:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|net|org|io|dev|sh|xyz|ru|cn)\b/i, 'contains a link or domain'],
+  [/`|\$\(|\$\{|&&|\|\||\|\s*[a-z]|\b(?:curl|wget|printenv|eval|exec|chmod|sudo|bash|powershell|base64)\b|\brm\s+-/i, 'contains a command'],
+  [
+    /\b(?:upload|send|post|share|paste|e-?mail|forward|transmit|copy|submit|exfiltrat\w*)\b[^.]{0,80}\b(?:env(?:ironment)?(?:\s+variables?|\s+vars?)?|\.env|secrets?|tokens?|credentials?|api\s*keys?|keys?|passwords?)\b/i,
+    'asks to send secrets or environment data somewhere',
+  ],
 ];
 
 /**

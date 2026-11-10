@@ -160,7 +160,9 @@ Real repositories also tried:
 | One action per package, across installed versions | that's the unit someone changes |
 | A candidate is checked against **every** advisory's ranges | advisories can affect separate version intervals; "addresses N" counts only what the version leaves |
 | npm aliases are looked up by their real name; every declaration is a required update | an alias under its folder name gives a false clean result; two aliases are two changes |
-| AI writes prose only, checked against the facts before use | no invented versions or advisory IDs, no other package's evidence, no "secure"/"fixed"; otherwise the template |
+| AI writes prose only, checked against the facts before use | no invented versions or advisory IDs, no other package's evidence, no "secure"/"fixed", no links, commands or requests to send secrets; otherwise the template |
+| AI prose stays in the report; the coding-agent prompt is template-only | an agent acts on its prompt, so model text there would be an injection path |
+| Package names from the lockfile are validated before any command is built | the lockfile is repository-controlled; a crafted name must not become shell syntax in a suggested command |
 | Actions are built when the report is read, from stored findings | findings are the stored facts; wording improvements apply to old reports |
 | Node runs `.ts` directly (type stripping) | no build step for the server; the UI is bundled with esbuild |
 
