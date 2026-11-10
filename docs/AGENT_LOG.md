@@ -71,3 +71,21 @@ One entry per milestone (or per notable session). Keep it factual.
 - The repo's original 4 M0 commits (authored with a work email) were removed outside the agent session
   (~13:50). The working tree was intact. History was restarted as one M0 commit with the personal email,
   rather than recreating step commits whose intermediate states were lost. Commits from M1 on are per green step.
+
+### 2026-11-10 · M1 vertical slice
+- **Agent did:** domain (URL normalization, lockfile parser basics, severity mapping); transactional submission
+  with idempotency (job id = scan id) and attempt-guarded repository; Fastify API; GitHub + OSV adapters
+  (OSV chunking and pagination done here rather than M2); pipeline + worker; minimal UI; compose with a
+  one-shot migrate service. One commit per green step.
+- **Assumptions it made:** Idempotency-Key optional (agreed); `/scans/:id` serves the page to browser
+  navigation and JSON to fetch (content negotiation); private repos visible through a token are refused as
+  "not found or private"; empty repo and >50 MB lockfile are `unsupported`; report endpoint is 409 until terminal.
+- **Found along the way:** msw 3 renamed `onUnhandledRequest` → `onUnhandledFrame` (the old option was silently
+  ignored, so unmocked calls wouldn't have failed tests); the project lockfile had 299 internal-registry URLs
+  from the machine's npm config → `.npmrc` pins registry.npmjs.org, M0 commit amended before any push;
+  Node type stripping forbids constructor parameter properties; Alpine `localhost` resolves to IPv6 (healthcheck).
+- **I corrected / rejected:** git author set to personal email for this repo; history restart (see above).
+- **Verified by:** 145 tests green; gate run on the live stack against real GitHub and OSV: the published demo
+  repo completed in ~5 s at its pinned commit (107 deps, 106 checked, 1 git dep unchecked, 39 advisories in
+  16 package versions incl. the MAL- record); Idempotency-Key replay → 200; nonexistent repo → failed
+  "not found or private" without retry. UI routes served; not yet clicked through in a browser.

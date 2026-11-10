@@ -6,7 +6,7 @@ Rule: one milestone at a time. A milestone is done only when its gate passes and
 ## M0 · Setup and verification (short)
 - [x] `git init`; `.gitignore` (node_modules, dist, .env, .idea/, .DS_Store); commit the docs first
 - [x] Repo skeleton per CLAUDE.md layout; strict tsconfig; ESLint; Vitest; docker-compose with Postgres
-- [ ] Demo fixture repo — prepared locally in `../scan-review-demo`, not yet published (separate public GitHub repo, lockfile only, never meant to be installed) covering:
+- [x] Demo fixture repo — https://github.com/arturowin/scan-review-demo (separate public GitHub repo, lockfile only, never meant to be installed) covering:
       direct vulnerable dep, transitive vulnerable dep, advisory with no fix, multi-advisory package needing a
       major jump, a `MAL-` package (version already removed from npm; use the real name/version from the advisory, never invent `resolved`/`integrity` values — omit them if unknown), a dev dep, a `link: true` workspace,
       a `git+` dependency. Use real OSV data to pick the packages; record which case each one covers.
@@ -16,14 +16,14 @@ Rule: one milestone at a time. A milestone is done only when its gate passes and
 **Gate:** `docker compose up` starts Postgres; `npm run migrate` works; verification notes written.
 
 ## M1 · Vertical slice
-- [ ] API and worker run as separate processes against Postgres
-- [ ] `POST /scans`: malformed or non-github.com URL → 400 with clear message; else 202 `{ scanId }`
-- [ ] Scan row + pg-boss job in one transaction; job id = scan id
-- [ ] Idempotency-Key: same key + same request → same scan; same key + different request → 409
-- [ ] Worker: resolve commit SHA, read `package-lock.json` at that SHA via raw.githubusercontent.com, query OSV, save findings, mark completed
-- [ ] GitHub errors: 404 → "not found or private"; rate-limit 403/429 → transient; optional GITHUB_TOKEN
-- [ ] `GET /scans/:id` (status, stage, counts) and `GET /scans/:id/report` (findings)
-- [ ] Minimal page: submit URL, poll status, list findings
+- [x] API and worker run as separate processes against Postgres
+- [x] `POST /scans`: malformed or non-github.com URL → 400 with clear message; else 202 `{ scanId }`
+- [x] Scan row + pg-boss job in one transaction; job id = scan id
+- [x] Idempotency-Key: same key + same request → same scan; same key + different request → 409
+- [x] Worker: resolve commit SHA, read `package-lock.json` at that SHA via raw.githubusercontent.com, query OSV, save findings, mark completed
+- [x] GitHub errors: 404 → "not found or private"; rate-limit 403/429 → transient; optional GITHUB_TOKEN
+- [x] `GET /scans/:id` (status, stage, counts) and `GET /scans/:id/report` (findings)
+- [x] Minimal page: submit URL, poll status, list findings
 **Gate:** a real public repo with known vulnerable npm deps goes from submit to report.
 Tests: URL normalization, idempotency (incl. 409), lockfile parser basics, one integration test with GitHub + OSV mocked.
 
