@@ -162,6 +162,7 @@ let following: string | null = null;
 
 async function follow(scanId: string): Promise<void> {
   following = scanId;
+  document.body.classList.add('has-scan'); // compact hero while a scan is on screen
   for (;;) {
     if (following !== scanId) return; // user started another scan
     let scan: ScanJson;
@@ -241,6 +242,23 @@ function renderMessage(text: string): void {
   result.replaceChildren(el('div', text, 'card'));
 }
 
+const STAGES: { stage: NonNullable<ScanJson['stage']>; label: string }[] = [
+  { stage: 'fetching', label: 'Fetch lockfile' },
+  { stage: 'scanning', label: 'Check advisories' },
+  { stage: 'analyzing', label: 'Rank and explain' },
+];
+
+/** Queued → fetch → check → rank, with the current step highlighted. */
+function stepsBar(scan: ScanJson): HTMLElement {
+  const bar = el('ol', undefined, 'steps-bar');
+  const current = scan.status === 'running' && scan.stage ? STAGES.findIndex((s) => s.stage === scan.stage) : -1;
+  bar.append(el('li', 'Queued', scan.status === 'queued' ? 'active' : 'done'));
+  STAGES.forEach((s, i) => {
+    bar.append(el('li', s.label, i < current ? 'done' : i === current ? 'active' : ''));
+  });
+  return bar;
+}
+
 function renderProgress(scan: ScanJson): void {
   const box = el('div', undefined, 'card');
   const c = scan.counts;
@@ -254,7 +272,9 @@ function renderProgress(scan: ScanJson): void {
           : scan.stage === 'scanning'
             ? `Checking ${String(c.totalDeps - c.unsupportedDeps)} dependencies against advisory data…`
             : 'Preparing results…';
-  box.append(repoTitle(scan), el('div', line, 'muted'));
+  const status = el('div', undefined, scan.status === 'retrying' ? 'error' : 'muted');
+  status.append(el('span', undefined, 'spinner'), line);
+  box.append(repoTitle(scan), stepsBar(scan), status);
   result.replaceChildren(box);
 }
 
@@ -274,6 +294,7 @@ function summaryCard(report: ReportJson): HTMLElement {
   const box = el('section', undefined, 'card');
   box.append(repoTitle(scan));
   box.append(el('p', report.summary ?? '', 'summary'));
+  box.append(statTiles(report));
   if (report.explanation) box.append(prose(report.explanation, 'explanation'));
   const meta = el('ul', undefined, 'meta');
   const coverage =
@@ -299,6 +320,25 @@ function summaryCard(report: ReportJson): HTMLElement {
     box.append(el('p', `Not checked, advisory lookup failed (temporary): ${names(lookupFailed)}. Scan again to check them.`, 'muted'));
   }
   return box;
+}
+
+/** Dashboard-style counts, all straight from the report data. */
+function statTiles(report: ReportJson): HTMLElement {
+  const c = report.scan.counts;
+  const malicious = report.actions.filter((a) => a.isMalicious).length;
+  const tiles: [string, string, boolean][] = [
+    [`${String(c.checkedDeps)} / ${String(c.totalDeps)}`, 'dependencies checked', false],
+    [String(report.actions.length), report.actions.length === 1 ? 'package to act on' : 'packages to act on', false],
+    [String(malicious), malicious === 1 ? 'known malicious' : 'known malicious', malicious > 0],
+    [String(report.findings.length), 'advisory records', false],
+  ];
+  const grid = el('div', undefined, 'stats');
+  for (const [value, label, alert] of tiles) {
+    const tile = el('div', undefined, alert ? 'stat alert' : 'stat');
+    tile.append(el('b', value), el('span', label));
+    grid.append(tile);
+  }
+  return grid;
 }
 
 const KIND_LABEL: Record<ActionJson['kind'], string> = {
@@ -465,7 +505,7 @@ function promptSection(report: ReportJson): HTMLElement {
   section.append(el('p', 'A prompt built from the findings above (no AI). Read it before you paste it.', 'muted'));
   const preview = el('details');
   preview.append(el('summary', 'Preview prompt'), el('pre', report.agentPrompt ?? ''));
-  const copy = el('button', 'Copy prompt', 'secondary');
+  const copy = el('button', 'Copy prompt', 'primary');
   copy.type = 'button';
   copy.addEventListener('click', () => {
     void navigator.clipboard.writeText(report.agentPrompt ?? '').then(
@@ -571,6 +611,7 @@ function route(): void {
     void follow(match[1]);
   } else {
     following = null;
+    document.body.classList.remove('has-scan');
     result.replaceChildren();
   }
 }
