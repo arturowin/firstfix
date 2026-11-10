@@ -161,6 +161,7 @@ Real repositories also tried:
 | A candidate is checked against **every** advisory's ranges | advisories can affect separate version intervals; "addresses N" counts only what the version leaves |
 | npm aliases are looked up by their real name; every declaration is a required update | an alias under its folder name gives a false clean result; two aliases are two changes |
 | AI writes prose only, checked against the facts before use | no invented versions or advisory IDs, no other package's evidence, no "secure"/"fixed"; otherwise the template |
+| The coding-agent prompt is template-built; checked AI explanations ride along as a marked context section | the agent gets the "why" without any fact, version or step coming from the model |
 | Actions are built when the report is read, from stored findings | findings are the stored facts; wording improvements apply to old reports |
 | Node runs `.ts` directly (type stripping) | no build step for the server; the UI is bundled with esbuild |
 

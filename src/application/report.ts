@@ -62,6 +62,7 @@ export function buildReport(data: ReportData, registry: EcosystemRegistry): Repo
           scannedAt: (scan.completedAt ?? scan.updatedAt).toISOString().slice(0, 10),
           actions: plan,
           hintsFor: (e) => ecosystem(e)?.hints ?? null,
+          aiContext: aiContext(scan.explanation),
         })
       : null;
 
@@ -75,4 +76,13 @@ export function buildReport(data: ReportData, registry: EcosystemRegistry): Repo
     unchecked: data.unchecked,
     agentPrompt,
   };
+}
+
+/** Only AI-sourced prose goes into the prompt; template prose adds nothing the facts don't already say. */
+function aiContext(e: ScanView['explanation']): { summary: string; actions: Record<string, string> } | null {
+  if (!e || e.source !== 'ai') return null;
+  const actions = Object.fromEntries(
+    Object.entries(e.actions).flatMap(([id, a]) => (a.source === 'ai' ? [[id, a.text] as const] : [])),
+  );
+  return { summary: e.summary, actions };
 }

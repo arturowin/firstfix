@@ -378,7 +378,9 @@ Fix information shapes the action, not the rank.
   a key.
 
 ### Coding-agent handoff prompt
-Built from a template (no AI). Includes: repo, commit, packages with evidence; candidate changes
+Facts, candidate changes and instructions are built from a template (no AI). When the scan's explanations came
+from the AI (and so passed the facts check), they are added as a marked "Context (AI-written…)" section before the
+facts, which win where they differ; no extra LLM call. Template-only scans get no such section. Includes: repo, commit, packages with evidence; candidate changes
 separated from facts; instructions to inspect the dependency graph first, keep unrelated changes,
 use the ecosystem's upgrade command (npm: `npm install <pkg>@<version>`), stop and report on major-version jumps, run tests, rescan, report
 unresolved items. User sees a preview before copying.

@@ -136,6 +136,8 @@ describe('end to end: submit → worker → report', () => {
     expect(report?.findings[0]?.package).toBe('flatmap-stream'); // findings ranked too
     expect(report?.ciChecks).toEqual(['Dependabot alerts', '`npm audit` in CI']);
     expect(report?.agentPrompt).toContain(`at commit ${SHA}`);
+    // The AI failed here, so the prompt is fully template-built: no AI context section.
+    expect(report?.agentPrompt).not.toContain('## Context');
 
     // AI failed → template prose, labelled, for the summary and every action; stored with the scan.
     expect(report?.explanation).toMatchObject({ source: 'template', text: expect.stringMatching(/^Start with flatmap-stream, a known malicious package/) as string });

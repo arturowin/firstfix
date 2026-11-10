@@ -297,6 +297,28 @@ describe('coding-agent prompt', () => {
     expect(text).not.toMatch(/\bfixed\b(?! version published)/i);
   });
 
+  it('AI context, when present, is a marked section before the facts; template-built parts are unchanged', () => {
+    const base = prompt() ?? '';
+    const withAi =
+      buildAgentPrompt({
+        repoUrl: 'https://github.com/arturowin/scan-review-demo',
+        commitSha: '2c18531'.padEnd(40, '0'),
+        lockfilePath: 'package-lock.json',
+        advisorySource: 'OSV.dev',
+        scannedAt: '2026-11-10',
+        actions: buildFixPlan(findings, scheme),
+        hintsFor: () => npm.hints,
+        aiContext: { summary: 'Remove flatmap-stream first.', actions: { 'npm:lodash': 'Used at runtime.', 'npm:left-pad': 'not in the plan' } },
+      }) ?? '';
+    const ctx = withAi.indexOf('## Context (AI-written, checked against the scan data; where it differs from the facts below, the facts win)');
+    expect(ctx).toBeGreaterThan(0);
+    expect(ctx).toBeLessThan(withAi.indexOf('## Facts from the scan'));
+    expect(withAi).toContain('Remove flatmap-stream first.\n\n- lodash: Used at runtime.');
+    expect(withAi).not.toContain('not in the plan'); // only actions in the prompt
+    // Remove the context section and the rest is exactly the template-built prompt.
+    expect(withAi.replace(/\n\n## Context[\s\S]*?(?=\n\n## Facts)/, '')).toBe(base);
+  });
+
   it('no findings → no prompt', () => {
     expect(
       buildAgentPrompt({ repoUrl: 'u', commitSha: 's', lockfilePath: 'p', advisorySource: 'OSV.dev', scannedAt: 'd', actions: [], hintsFor: () => npm.hints }),
