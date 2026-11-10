@@ -46,8 +46,11 @@ Tests: URL normalization, idempotency (incl. 409), lockfile parser basics, one i
       - report names the advisory data source next to coverage
 - [x] Only lockfileVersion 2/3 supported; others → `unsupported` with reason
 - [x] Lockfile parsing rules from ARCHITECTURE.md (link, sources, dev/optional/devOptional, direct, dedupe, path aggregation)
-- [x] OSV chunking (≤1000), pagination, detail fetch deduped with a concurrency limit, failed-lookup accounting
-- [x] Counts: checked, unsupported-source entries, failed lookups; zero-dependency lockfile handled
+- [x] OSV chunking (≤1000), pagination, detail fetch deduped with a concurrency limit
+- [ ] Failed-lookup accounting → moved to M4 (today any failed lookup throws and the scan is retried;
+      `failedLookups` is always 0)
+- [x] Counts: checked, unsupported-source entries; zero-dependency lockfile handled; zero *checked* deps get
+      "No dependencies could be checked", never a clean result (failed-lookup count: M4)
 - [x] Ranking policy as documented (malicious first, then severity, runtime/dev, direct/transitive)
 - [x] Malicious packages (`MAL-`) as a separate category with "remove + rotate secrets" action
 - [x] Recommended next actions grouped by package; candidate version labelled; direct parent named for transitive; "no fixed version published" guidance; major-version jumps flagged

@@ -112,3 +112,26 @@ One entry per milestone (or per notable session). Keep it factual.
   3 low) in 106 of 107 dependencies checked. Start with: remove flatmap-stream", 15 ranked actions, major
   jumps flagged with a compatible alternative (postcss 7.0.36 vs 8.5.23). UI bundle served; not yet clicked
   through in a browser.
+
+### 2026-11-10 · M2 review fixes
+- **Review found (all confirmed against the code before fixing):**
+  - P1: an advisory counted as addressed when its first candidate was ≤ the proposed version, which is wrong
+    when it affects separate intervals.
+  - P1: npm aliases were queried under the install-folder name, which could produce a false clean result.
+  - P2: the browser could stall if the final report request failed.
+  - P2: zero checked dependencies were worded like a clean result.
+  - PLAN overclaimed failed-lookup accounting.
+- **Agent did:**
+  - Range-aware planning: the proposed version is checked against every advisory's stored ranges and moved
+    past any interval with a fix.
+  - Aliases: the real name comes from the lockfile entry's `name`, which I confirmed by generating a real npm
+    10 lockfile; it's kept as a fixture. The alias is kept in `installed_as` (migration 005) and in the upgrade
+    command.
+  - Browser: a report-fetch retry loop with a visible message. Polling also survives non-200 and non-JSON
+    answers, a gap the review didn't list.
+  - Zero checked: "No dependencies could be checked" headline.
+  - PLAN corrected: failed-lookup accounting is M4.
+- **Note:** migration 003's comment ("the report never reads affected_ranges") is now out of date; applied
+  migrations aren't edited, so ARCHITECTURE records it.
+- **Verified by:** 218 tests green (typecheck, lint). UI fixes are not covered by tests (no DOM test setup)
+  and not yet checked in a browser.
