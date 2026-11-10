@@ -11,7 +11,7 @@ import type {
   ScanView,
   UncheckedView,
 } from '../../ports/scan-repository.ts';
-import type { Severity } from '../../domain/advisory.ts';
+import type { AffectedRange, Severity } from '../../domain/advisory.ts';
 import type { FixStatus } from '../../domain/candidate.ts';
 import type { Scope } from '../../domain/lockfile.ts';
 import { inTransactionOrRollback, Rollback } from './pool.ts';
@@ -65,6 +65,20 @@ function toView(r: ScanRow): ScanView {
   };
 }
 
+/** Stored ranges in the neutral AffectedRange shape, or null for older rows that hold raw provider JSON. */
+function neutralRanges(value: unknown): AffectedRange[] | null {
+  if (!Array.isArray(value)) return null;
+  const str = (v: unknown) => typeof v === 'string';
+  const strOrNull = (v: unknown) => v === null || typeof v === 'string';
+  const ok = value.every((r: unknown) => {
+    if (typeof r !== 'object' || r === null) return false;
+    const x = r as Record<string, unknown>;
+    if (x['kind'] === 'versions') return Array.isArray(x['versions']) && x['versions'].every(str);
+    return x['kind'] === 'range' && str(x['introduced']) && strOrNull(x['fixed']) && strOrNull(x['lastAffected']);
+  });
+  return ok ? (value as AffectedRange[]) : null;
+}
+
 const COUNT_COLUMNS: Record<keyof ScanCounts, string> = {
   totalDeps: 'total_deps',
   checkedDeps: 'checked_deps',
@@ -104,10 +118,11 @@ export class PostgresScanRepository implements ScanRepository {
       title: string | null;
       candidate_version: string | null;
       fix_status: FixStatus;
+      affected_ranges: unknown;
       references: { type: string; url: string }[];
     }>(
       `SELECT ecosystem, package, installed_as, installed_version, scope, is_direct, direct_parents, install_paths, advisory_id, aliases, severity,
-              is_malicious, title, candidate_version, fix_status, "references"
+              is_malicious, title, candidate_version, fix_status, affected_ranges, "references"
          FROM findings WHERE scan_id = $1 ORDER BY ecosystem, package, installed_version, advisory_id`,
       [scanId],
     );
@@ -135,6 +150,7 @@ export class PostgresScanRepository implements ScanRepository {
           title: f.title,
           candidateVersion: f.candidate_version,
           fixStatus: f.fix_status,
+          affectedRanges: neutralRanges(f.affected_ranges),
           references: f.references,
         }),
       ),

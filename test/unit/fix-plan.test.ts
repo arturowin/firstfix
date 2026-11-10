@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { AffectedRange } from '../../src/domain/advisory.ts';
 import { buildAgentPrompt } from '../../src/domain/agent-prompt.ts';
 import { npm } from '../../src/domain/ecosystems/npm/index.ts';
 import { npmVersionScheme } from '../../src/domain/ecosystems/npm/version.ts';
@@ -20,10 +21,19 @@ function f(over: Partial<PlanFinding> & Pick<PlanFinding, 'package' | 'advisoryI
     title: null,
     candidateVersion: null,
     fixStatus: 'no_fix',
+    affectedRanges: [range('0', null)],
     ...over,
   };
 }
-const cand = (version: string) => ({ candidateVersion: version, fixStatus: 'candidate' as const });
+function range(introduced: string, fixed: string | null): AffectedRange {
+  return { kind: 'range', introduced, fixed, lastAffected: null };
+}
+/** A candidate with the simplest ranges behind it: everything below it is affected. */
+const cand = (version: string) => ({
+  candidateVersion: version,
+  fixStatus: 'candidate' as const,
+  affectedRanges: [range('0', version)],
+});
 
 describe('ranking policy', () => {
   it('malicious first, then severity, then runtime before dev, then direct before transitive', () => {
@@ -102,6 +112,40 @@ describe('grouping into actions', () => {
       '5.0.0 is a major-version jump from 4.2.0; 4.9.1 addresses 2 of 4 without one. Check the changelog before choosing.',
       'No fixed version published for D: review the advisory and upstream guidance, and assess your exposure (or replace the package).',
     ]);
+  });
+
+  it('separate affected intervals: a proposed version inside one is moved past it, never counted as addressed', () => {
+    // Review reproduction. A affects <1.2.0 and [2.0.0, 2.2.0); B affects <2.0.0. Installed 1.0.0.
+    // Per-advisory candidates are 1.2.0 (A) and 2.0.0 (B), but 2.0.0 is still affected by A.
+    const [a] = buildFixPlan(
+      [
+        f({ package: 'lib', installedVersion: '1.0.0', advisoryId: 'A', candidateVersion: '1.2.0', fixStatus: 'candidate', affectedRanges: [range('0', '1.2.0'), range('2.0.0', '2.2.0')] }),
+        f({ package: 'lib', installedVersion: '1.0.0', advisoryId: 'B', candidateVersion: '2.0.0', fixStatus: 'candidate', affectedRanges: [range('0', '2.0.0')] }),
+      ],
+      scheme,
+    );
+    expect(a?.versions[0]?.candidate).toEqual({ version: '2.2.0', addresses: 2, majorJump: true });
+    // The compatible 1.x choice addresses only A.
+    expect(a?.versions[0]?.compatibleCandidate).toEqual({ version: '1.2.0', addresses: 1, majorJump: false });
+  });
+
+  it('a later interval with no fix: the proposed version addresses only what it really leaves', () => {
+    const [a] = buildFixPlan(
+      [
+        f({ package: 'lib', installedVersion: '1.0.0', advisoryId: 'A', candidateVersion: '1.2.0', fixStatus: 'candidate', affectedRanges: [range('0', '1.2.0'), range('1.5.0', null)] }),
+        f({ package: 'lib', installedVersion: '1.0.0', advisoryId: 'B', candidateVersion: '1.6.0', fixStatus: 'candidate', affectedRanges: [range('0', '1.6.0')] }),
+      ],
+      scheme,
+    );
+    expect(a?.versions[0]?.candidate).toEqual({ version: '1.6.0', addresses: 1, majorJump: false });
+  });
+
+  it('without stored ranges nothing is claimed as addressed', () => {
+    const [a] = buildFixPlan(
+      [f({ package: 'lib', installedVersion: '1.0.0', advisoryId: 'A', candidateVersion: '1.2.0', fixStatus: 'candidate', affectedRanges: null })],
+      scheme,
+    );
+    expect(a?.versions[0]?.candidate).toMatchObject({ version: '1.2.0', addresses: 0 });
   });
 
   it('malicious: remove + rotate secrets, even when another advisory on it has a candidate', () => {

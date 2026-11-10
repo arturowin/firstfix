@@ -1,4 +1,4 @@
-import type { Advisory, Severity } from '../domain/advisory.ts';
+import type { Advisory, AffectedRange, Severity } from '../domain/advisory.ts';
 import type { FixStatus } from '../domain/candidate.ts';
 import type { EcosystemId } from '../domain/ecosystems/types.ts';
 import type { Scope } from '../domain/lockfile.ts';
@@ -63,6 +63,8 @@ export interface FindingView {
   title: string | null;
   candidateVersion: string | null;
   fixStatus: FixStatus;
+  /** Null for rows stored before ranges were provider-neutral (see migration 003). */
+  affectedRanges: AffectedRange[] | null;
   references: { type: string; url: string }[];
 }
 

@@ -149,5 +149,6 @@ function toPlanFinding(f: FindingInput): PlanFinding {
     title: f.advisory.title,
     candidateVersion: f.candidateVersion,
     fixStatus: f.fixStatus,
+    affectedRanges: f.advisory.affectedRanges,
   };
 }

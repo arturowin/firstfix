@@ -305,7 +305,13 @@ Fix information shapes the action, not the rank.
 - Transitive package → name the direct parent that pulls it in.
 - No fix event → "no fixed version published: review the advisory and upstream guidance, assess exposure".
 - Counts say "addresses N advisories according to advisory data"; only a rescan confirms.
-- Several advisories on one package@version: candidate = the highest per-advisory candidate. If that
+- Several advisories on one package@version: start from the highest per-advisory candidate, then check it
+  against **every** advisory's stored ranges (an advisory can affect separate intervals, e.g. `<1.2.0` and
+  `[2.0.0, 2.2.0)`); while it sits inside a range that has a fix, move to that fix. "Addresses N" counts only
+  advisories with no range containing the proposed version. The report reads `findings.affected_ranges` for
+  this; rows from before migration 003 (raw OSV JSON) read back as null and nothing is claimed from them
+  (migration 003's comment saying the column is never read is out of date; applied migrations aren't edited).
+  Review finding, M2. If that
   crosses a major version while a lower candidate would fix some advisories, show both ("4.x fixes 2 of 3;
   5.x needed for the third") and flag the major jump. Advisories with no fix are listed in the action
   as unresolved by any upgrade.

@@ -112,6 +112,7 @@ describe('PostgresScanRepository: attempt ownership', () => {
         title: 'ReDoS in lodash',
         candidateVersion: '4.17.21',
         fixStatus: 'candidate',
+        affectedRanges: [{ kind: 'range', introduced: '4.0.0', fixed: '4.17.21', lastAffected: null }],
         references: [{ type: 'ADVISORY', url: 'https://example.com' }],
       },
     ]);
@@ -130,6 +131,18 @@ describe('PostgresScanRepository: attempt ownership', () => {
       status: 'unsupported',
       error: { code: 'no_lockfile', message: 'no package-lock.json' },
     });
+  });
+
+  it('ranges stored before they were provider-neutral read back as null (nothing claimed from them)', async () => {
+    const id = await newScan();
+    const claim = await repo.claim(id);
+    if (!claim) throw new Error('claim failed');
+    await repo.complete(claim, completion);
+    await env.pool.query(
+      `UPDATE findings SET affected_ranges = '[{"type":"SEMVER","events":[{"introduced":"0"}]}]' WHERE scan_id = $1`,
+      [id],
+    );
+    expect((await repo.getReport(id))?.findings[0]?.affectedRanges).toBeNull();
   });
 
   it('a failed completion transaction leaves no partial findings', async () => {

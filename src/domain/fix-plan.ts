@@ -3,7 +3,7 @@
  * Pure and deterministic: the same findings always give the same plan. Facts come from findings; versions are
  * candidates from advisory data, never "fixes".
  */
-import type { Severity } from './advisory.ts';
+import type { AffectedRange, Severity } from './advisory.ts';
 import type { FixStatus } from './candidate.ts';
 import type { EcosystemId, VersionScheme } from './ecosystems/types.ts';
 import type { Scope } from './lockfile.ts';
@@ -24,6 +24,8 @@ export interface PlanFinding {
   title: string | null;
   candidateVersion: string | null;
   fixStatus: FixStatus;
+  /** The advisory's ranges for this package; null when not available (then nothing is claimed as addressed). */
+  affectedRanges: AffectedRange[] | null;
 }
 
 export type ActionKind =
@@ -119,9 +121,38 @@ function planVersion(installed: string, findings: PlanFinding[], scheme: Version
   const withCandidate = findings.filter(
     (f): f is PlanFinding & { candidateVersion: string } => f.fixStatus === 'candidate' && f.candidateVersion !== null,
   );
+  /**
+   * Whether `version` is still affected by advisory `f`. Ranges are checked one by one: an advisory can affect
+   * several separate intervals, so "at or above its first fix" is not "unaffected". Without stored ranges
+   * nothing can be checked, so the advisory counts as still affecting the version.
+   */
+  const affects = (f: PlanFinding, version: string): boolean =>
+    scheme === null || f.affectedRanges === null || f.affectedRanges.some((r) => scheme.inRange(version, r));
+
+  /**
+   * From `start` (no lower version can address every advisory that has a candidate), move up to the fix of any
+   * range that still contains the version, until none does or only ranges without a fix remain.
+   * `allowJump: false` stops before a major-version jump.
+   */
+  const resolve = (start: string, allowJump: boolean): string => {
+    if (!scheme) return start;
+    let version = start;
+    for (;;) {
+      let next: string | null = null;
+      for (const f of withCandidate) {
+        for (const r of f.affectedRanges ?? []) {
+          if (r.kind !== 'range' || r.fixed === null || !scheme.isValid(r.fixed) || !scheme.inRange(version, r)) continue;
+          if (scheme.compare(r.fixed, version) > 0 && (next === null || scheme.compare(r.fixed, next) > 0)) next = r.fixed;
+        }
+      }
+      if (next === null || (!allowJump && scheme.isMajorJump(installed, next))) return version;
+      version = next; // strictly increasing over a finite set of fixed versions: terminates
+    }
+  };
+
   const step = (version: string): CandidateStep => ({
     version,
-    addresses: scheme ? withCandidate.filter((f) => scheme.compare(f.candidateVersion, version) <= 0).length : 0,
+    addresses: withCandidate.filter((f) => !affects(f, version)).length,
     majorJump: scheme ? scheme.isMajorJump(installed, version) : false,
   });
 
@@ -131,13 +162,16 @@ function planVersion(installed: string, findings: PlanFinding[], scheme: Version
     const versions = withCandidate.map((f) => f.candidateVersion);
     const highest = maxBy(versions, (a, b) => scheme.compare(a, b));
     if (highest !== undefined) {
-      candidate = step(highest);
+      candidate = step(resolve(highest, true));
       if (candidate.majorJump) {
         const compatible = maxBy(
           versions.filter((v) => !scheme.isMajorJump(installed, v)),
           (a, b) => scheme.compare(a, b),
         );
-        if (compatible !== undefined) compatibleCandidate = step(compatible);
+        if (compatible !== undefined) {
+          const c = step(resolve(compatible, false));
+          if (c.addresses > 0) compatibleCandidate = c;
+        }
       }
     }
   }
