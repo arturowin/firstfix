@@ -459,7 +459,11 @@ function findingsSection(report: ReportJson): HTMLElement {
   const wrap = el('div', undefined, 'table-wrap');
   wrap.append(table);
   section.append(wrap);
-  if (report.unchecked.length > 0) section.append(uncheckedList(report));
+  if (report.unchecked.length > 0) {
+    const card = el('div', undefined, 'card');
+    card.append(uncheckedList(report));
+    section.append(card);
+  }
   return section;
 }
 
