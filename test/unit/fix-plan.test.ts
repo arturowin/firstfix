@@ -270,6 +270,13 @@ describe('summary line', () => {
     expect(`${clean} ${empty}`).not.toMatch(/secure|safe/i);
   });
 
+  it('zero fully checked but a confirmed finding from an incomplete lookup: the finding leads, not "nothing could be checked"', () => {
+    const [mal] = buildFixPlan([f({ package: 'flatmap-stream', advisoryId: 'MAL-1', isMalicious: true, severity: 'unknown' })], scheme);
+    expect(summaryLine({ counts: { totalDeps: 1, checkedDeps: 0, failedLookups: 1 }, lockfilePath: 'package-lock.json', actions: mal ? [mal] : [] })).toMatch(
+      /^1 known malicious package in 0 of 1 dependency checked\. 1 dependency could not be fully checked/,
+    );
+  });
+
   it('nothing checked is not reported as "no known vulnerabilities"', () => {
     const none = summaryLine({ counts: { totalDeps: 3, checkedDeps: 0 }, lockfilePath: 'package-lock.json', actions: [] });
     expect(none).toBe(

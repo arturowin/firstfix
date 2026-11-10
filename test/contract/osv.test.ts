@@ -307,6 +307,33 @@ describe('OsvVulnDatabase', () => {
     expect(r.advisories.get('npm:flatmap-stream@0.1.1')).toEqual([expect.objectContaining({ id: 'MAL-2025-20690', isMalicious: true })]);
   });
 
+  describe('a later results page fails (review finding)', () => {
+    const flatmap = { ecosystem: 'npm', name: 'flatmap-stream', version: '0.1.1' };
+
+    it('page one’s confirmed malware finding is kept; the package is incomplete, not failed', async () => {
+      serveVulnFixtures(new Map());
+      server.use(
+        http.post(`${OSV}/v1/querybatch`, async ({ request }) => {
+          const { queries } = (await request.json()) as Batch;
+          if (queries[0]?.page_token === undefined) {
+            return HttpResponse.json({ results: [{ vulns: [{ id: 'MAL-2025-20690' }], next_page_token: 'page-2' }] });
+          }
+          return new HttpResponse(null, { status: 503 }); // page two, and its retry
+        }),
+      );
+      const r = await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([flatmap], signal());
+      expect(r.failed).toEqual([]);
+      expect(r.incomplete).toEqual([flatmap]);
+      expect(r.advisories.get('npm:flatmap-stream@0.1.1')?.map((x) => [x.id, x.isMalicious])).toEqual([['MAL-2025-20690', true]]);
+    });
+
+    it('a first-page failure (no usable evidence) still reports the package failed', async () => {
+      server.use(http.post(`${OSV}/v1/querybatch`, () => new HttpResponse(null, { status: 503 })));
+      const r = await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([flatmap], signal());
+      expect(r).toEqual({ advisories: new Map(), failed: [flatmap], incomplete: [] });
+    });
+  });
+
   it('no packages → no calls', async () => {
     expect(await new OsvVulnDatabase().lookup([], signal())).toEqual({ advisories: new Map(), failed: [], incomplete: [] });
   });

@@ -41,7 +41,7 @@ export class OsvVulnDatabase implements VulnDatabase {
   }
 
   async lookup(packages: PackageRef[], signal: AbortSignal): Promise<LookupResult> {
-    const { ids: idsByPackage, failed } = await this.queryIds(packages, signal);
+    const { ids: idsByPackage, failed, partial } = await this.queryIds(packages, signal);
 
     // Details once per advisory id, shared across packages; a failed id fails every package that cites it.
     const uniqueIds = [...new Set([...idsByPackage.values()].flat())].sort();
@@ -80,7 +80,7 @@ export class OsvVulnDatabase implements VulnDatabase {
         }
       }
       if (confirmed.length > 0) result.advisories.set(key, confirmed);
-      if (missing) result.incomplete.push(pkg);
+      if (missing || partial.has(key)) result.incomplete.push(pkg);
     }
     return result;
   }
@@ -88,9 +88,13 @@ export class OsvVulnDatabase implements VulnDatabase {
   private async queryIds(
     packages: PackageRef[],
     signal: AbortSignal,
-  ): Promise<{ ids: Map<string, string[]>; failed: Set<string> }> {
+  ): Promise<{ ids: Map<string, string[]>; failed: Set<string>; partial: Set<string> }> {
     const ids = new Map<string, string[]>();
     const failed = new Set<string>();
+    // A later results page failed: earlier pages' ids are real evidence, so the package is incomplete, not failed.
+    const partial = new Set<string>();
+    const lose = (entry: { pkg: PackageRef; pageToken?: string }) =>
+      (entry.pageToken === undefined ? failed : partial).add(packageKey(entry.pkg));
     let pending: { pkg: PackageRef; pageToken?: string }[] = packages.map((pkg) => ({ pkg }));
 
     // Each round sends at most batchSize queries; queries that returned a page token go into the next round.
@@ -117,7 +121,7 @@ export class OsvVulnDatabase implements VulnDatabase {
         } catch (err) {
           if (signal.aborted) throw err;
           // This chunk (or this page of it) couldn't be checked; other chunks still count.
-          for (const { pkg } of chunk) failed.add(packageKey(pkg));
+          for (const entry of chunk) lose(entry);
           continue;
         }
         results.forEach((r, j) => {
@@ -126,7 +130,7 @@ export class OsvVulnDatabase implements VulnDatabase {
           const key = packageKey(entry.pkg);
           // A malformed entry fails its own package only; positions still line up for the rest.
           if (!isBatchResult(r)) {
-            failed.add(key);
+            lose(entry);
             return;
           }
           const list = ids.get(key) ?? [];
@@ -137,7 +141,7 @@ export class OsvVulnDatabase implements VulnDatabase {
       }
       pending = next;
     }
-    return { ids, failed };
+    return { ids, failed, partial };
   }
 
   /** One quick retry per call: a single dropped request shouldn't cost a package its check. */

@@ -564,7 +564,7 @@ function cleanCard(report: ReportJson): HTMLElement {
   box.append(repoTitle(scan));
   if (c.totalDeps === 0) {
     box.append(el('p', report.summary ?? 'No dependencies to check.', 'summary'));
-  } else if (c.checkedDeps === 0) {
+  } else if (c.checkedDeps === 0 && c.failedLookups === 0) {
     // Nothing was assessed: not a clean result.
     box.append(el('p', 'No dependencies could be checked', 'summary'));
     box.append(
