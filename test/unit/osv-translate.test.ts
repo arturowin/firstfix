@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { npmVersionScheme } from '../../src/domain/ecosystems/npm/version.ts';
+import { selectCandidate } from '../../src/domain/candidate.ts';
 import { isMalicious, isOsvVuln, severityFromLabel, toAdvisory, toRanges, type OsvVuln } from '../../src/adapters/osv/translate.ts';
 import { readdirSync } from 'node:fs';
 
@@ -103,5 +105,38 @@ describe('isOsvVuln', () => {
     const records = readdirSync(dir).filter((f) => /^(GHSA|MAL)-.*\.json$/.test(f));
     expect(records.length).toBeGreaterThan(4);
     for (const f of records) expect(isOsvVuln(fixture(f.replace(/\.json$/, '')), f.replace(/\.json$/, ''))).toBe(true);
+  });
+});
+
+describe('events in version order (review finding)', () => {
+  const order = npmVersionScheme;
+  const r = (events: object[], versions?: string[]) =>
+    toRanges({ ranges: [{ type: 'SEMVER', events }], ...(versions ? { versions } : {}) }, order);
+
+  it('"fixed 1.2.0" listed before "introduced 1.0.0" is the range [1.0.0, 1.2.0): 1.1.0 has candidate 1.2.0', () => {
+    const ranges = r([{ fixed: '1.2.0' }, { introduced: '1.0.0' }]);
+    expect(ranges).toEqual([{ kind: 'range', introduced: '1.0.0', fixed: '1.2.0', lastAffected: null }]);
+    expect(selectCandidate('1.1.0', ranges, npmVersionScheme)).toEqual({ status: 'candidate', version: '1.2.0' });
+  });
+
+  it('shuffled multi-interval events with "0", a finite limit and an explicit list keep their meaning', () => {
+    expect(r([{ fixed: '2.2.0' }, { limit: '3.0.0' }, { introduced: '2.0.0' }, { fixed: '1.2.0' }, { introduced: '0' }], ['2.5.0'])).toEqual([
+      { kind: 'range', introduced: '0', fixed: '1.2.0', lastAffected: null, limits: ['3.0.0'] },
+      { kind: 'range', introduced: '2.0.0', fixed: '2.2.0', lastAffected: null, limits: ['3.0.0'] },
+      { kind: 'versions', versions: ['2.5.0'] },
+    ]);
+  });
+
+  it('a wildcard limit and a same-version re-introduction keep their order (ties are stable)', () => {
+    expect(r([{ introduced: '0' }, { fixed: '2.0.0' }, { introduced: '2.0.0' }, { limit: '*' }])).toEqual([
+      { kind: 'range', introduced: '0', fixed: '2.0.0', lastAffected: null },
+      { kind: 'range', introduced: '2.0.0', fixed: null, lastAffected: null },
+    ]);
+  });
+
+  it('a version the ecosystem can’t order keeps the listed order (never guessed)', () => {
+    expect(r([{ fixed: 'not-a-version' }, { introduced: '1.0.0' }])).toEqual([
+      { kind: 'range', introduced: '1.0.0', fixed: null, lastAffected: null },
+    ]);
   });
 });

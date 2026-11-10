@@ -1,7 +1,8 @@
 import { TransientError } from '../../ports/errors.ts';
 import { packageKey, type LookupResult, type PackageRef, type VulnDatabase } from '../../ports/vuln-database.ts';
 import { fetchWithTimeout, USER_AGENT } from '../http.ts';
-import { isOsvVuln, toAdvisory, type OsvVuln } from './translate.ts';
+import { defaultRegistry } from '../../domain/ecosystems/registry.ts';
+import { isOsvVuln, toAdvisory, type OsvVuln, type VersionOrder } from './translate.ts';
 
 export interface OsvOptions {
   baseUrl?: string;
@@ -11,6 +12,8 @@ export interface OsvOptions {
   detailConcurrency?: number;
   /** Pause before the one retry of a failed call. */
   retryDelayMs?: number;
+  /** Version ordering per ecosystem, to sort range events (default: the ecosystem registry's schemes). */
+  versionOrder?: (ecosystem: string) => VersionOrder | null;
 }
 
 interface BatchQuery {
@@ -31,6 +34,7 @@ export class OsvVulnDatabase implements VulnDatabase {
   private readonly batchSize: number;
   private readonly detailConcurrency: number;
   private readonly retryDelayMs: number;
+  private readonly versionOrder: (ecosystem: string) => VersionOrder | null;
 
   constructor(options: OsvOptions = {}) {
     this.baseUrl = options.baseUrl ?? 'https://api.osv.dev';
@@ -38,6 +42,7 @@ export class OsvVulnDatabase implements VulnDatabase {
     this.batchSize = options.batchSize ?? 1000;
     this.detailConcurrency = options.detailConcurrency ?? 8;
     this.retryDelayMs = options.retryDelayMs ?? 500;
+    this.versionOrder = options.versionOrder ?? ((e) => defaultRegistry.ecosystems.get(e)?.versionScheme ?? null);
   }
 
   async lookup(packages: PackageRef[], signal: AbortSignal): Promise<LookupResult> {
@@ -74,7 +79,7 @@ export class OsvVulnDatabase implements VulnDatabase {
           continue;
         }
         try {
-          confirmed.push(toAdvisory(detail, pkg));
+          confirmed.push(toAdvisory(detail, pkg, this.versionOrder(pkg.ecosystem)));
         } catch {
           missing = true; // validated records shouldn't fail to translate; if one does, only it is lost
         }

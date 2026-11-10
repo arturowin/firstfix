@@ -334,6 +334,22 @@ describe('OsvVulnDatabase', () => {
     });
   });
 
+  it('a record listing "fixed" before "introduced" is read in version order through the adapter (review finding)', async () => {
+    server.use(
+      http.post(`${OSV}/v1/querybatch`, () => HttpResponse.json({ results: [{ vulns: [{ id: 'GHSA-ordr-ordr-ordr' }] }] })),
+      http.get(`${OSV}/v1/vulns/GHSA-ordr-ordr-ordr`, () =>
+        HttpResponse.json({
+          id: 'GHSA-ordr-ordr-ordr',
+          affected: [{ package: { ecosystem: 'npm', name: 'a' }, ranges: [{ type: 'SEMVER', events: [{ fixed: '1.2.0' }, { introduced: '1.0.0' }] }] }],
+        }),
+      ),
+    );
+    const r = await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([{ ecosystem: 'npm', name: 'a', version: '1.1.0' }], signal());
+    expect(r.advisories.get('npm:a@1.1.0')?.[0]?.affectedRanges).toEqual([
+      { kind: 'range', introduced: '1.0.0', fixed: '1.2.0', lastAffected: null },
+    ]);
+  });
+
   it('no packages → no calls', async () => {
     expect(await new OsvVulnDatabase().lookup([], signal())).toEqual({ advisories: new Map(), failed: [], incomplete: [] });
   });

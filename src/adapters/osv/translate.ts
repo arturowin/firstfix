@@ -91,11 +91,34 @@ export function isMalicious(v: OsvVuln): boolean {
  * below some limit; "*" = unlimited) and are never a fix. An explicit `versions` list is kept too, even next to
  * ranges. GIT ranges (commit hashes) say nothing about package versions: skipped.
  */
-export function toRanges(entry: OsvAffected): AffectedRange[] {
+/** How an ecosystem orders versions; used to put a range's events in version order. */
+export interface VersionOrder {
+  isValid(version: string): boolean;
+  compare(a: string, b: string): number;
+}
+
+/**
+ * Events in version order (OSV evaluates them sorted, whatever order the record lists them in). "0" is the
+ * lowest; ties keep their listed order. If any version can't be ordered (or no ordering is known for the
+ * ecosystem), the listed order is kept rather than guessed.
+ */
+function sortedEvents(events: OsvEvent[], order: VersionOrder | null): OsvEvent[] {
+  if (!order) return events;
+  // Limits apply to the whole range wherever they appear: kept aside so the comparison below is a total order.
+  const limits = events.filter((e) => e.introduced === undefined && e.fixed === undefined && e.last_affected === undefined);
+  const keyed = events
+    .map((e, index) => ({ e, index, v: e.introduced ?? e.fixed ?? e.last_affected }))
+    .filter((k): k is { e: OsvEvent; index: number; v: string } => k.v !== undefined);
+  if (!keyed.every((k) => k.v === '0' || order.isValid(k.v))) return events;
+  const rank = (v: string, w: string): number => (v === w ? 0 : v === '0' ? -1 : w === '0' ? 1 : order.compare(v, w));
+  return [...keyed.sort((a, b) => rank(a.v, b.v) || a.index - b.index).map((k) => k.e), ...limits];
+}
+
+export function toRanges(entry: OsvAffected, order: VersionOrder | null = null): AffectedRange[] {
   const out: AffectedRange[] = [];
   for (const range of entry.ranges ?? []) {
     if (range.type === 'GIT') continue;
-    const events = range.events ?? [];
+    const events = sortedEvents(range.events ?? [], order);
     // OSV evaluation: `limit` events apply to the whole range (every interval in it), not just the interval
     // they follow; a version is affected only if it is below at least one limit; "*" means unlimited.
     const limitEvents = events.flatMap((e) => (e.limit !== undefined ? [e.limit] : []));
@@ -125,10 +148,10 @@ export function toRanges(entry: OsvAffected): AffectedRange[] {
 }
 
 /** Only the parts of an OSV record that apply to this package (same ecosystem, exact name). */
-export function toAdvisory(v: OsvVuln, pkg: { ecosystem: string; name: string }): Advisory {
+export function toAdvisory(v: OsvVuln, pkg: { ecosystem: string; name: string }, order: VersionOrder | null = null): Advisory {
   const ranges = (v.affected ?? [])
     .filter((a) => a.package?.ecosystem === pkg.ecosystem && a.package.name === pkg.name)
-    .flatMap(toRanges);
+    .flatMap((a) => toRanges(a, order));
   return {
     id: v.id,
     aliases: v.aliases ?? [],
