@@ -97,11 +97,11 @@ Never cut a test while keeping the claim it proves. If a guarantee isn't tested,
       Status: passed; outcome → test map in ARCHITECTURE.md "Lifecycle".
 
 ## M5 · Polish and release
-- [ ] UI states: input, progress, retrying, completed, partial, clean, unsupported, failed
-- [ ] Unit + integration + adapter contract tests complete
-- [ ] README: Product interpretation → Assumptions → Quick start (Docker and non-Docker) → Demo repo → Architecture → Decisions → Failure behavior → Limits → Next steps → How I used coding agents (from AGENT_LOG)
-- [ ] Demo fixture repo linked, with a warning not to `npm install` it; tested end to end; one real popular repo also tried
-- [ ] README Limits: no rate limit on POST /scans, worker concurrency, idempotency key retention, GHSA-only severity,
+- [x] UI states: input, progress, retrying, completed, partial, clean, unsupported, failed (each checked at desktop and phone width)
+- [x] Unit + integration + adapter contract tests complete
+- [x] README: Product interpretation → Assumptions → Quick start (Docker and non-Docker) → Demo repo → Architecture → Decisions → Failure behavior → Limits → Next steps → How I used coding agents (from AGENT_LOG)
+- [x] Demo fixture repo linked, with a warning not to `npm install` it; tested end to end; one real popular repo also tried
+- [x] README Limits: no rate limit on POST /scans, worker concurrency, idempotency key retention, GHSA-only severity,
       npm only (ecosystem seams ready; lockfile ecosystems vs resolve-first ones), one lockfile per scan,
       one advisory source (OSV; provider contract ready)
 - [ ] Usability check: show the report to someone unfamiliar; ask what they'd do first and why, what was checked, what's uncertain. Fix confusion.
