@@ -10,6 +10,7 @@ const scheme = () => npmVersionScheme;
 function f(over: Partial<PlanFinding> & Pick<PlanFinding, 'package' | 'advisoryId'>): PlanFinding {
   return {
     ecosystem: 'npm',
+    installedAs: [],
     installedVersion: '1.0.0',
     scope: 'runtime',
     isDirect: true,
@@ -125,6 +126,16 @@ describe('grouping into actions', () => {
     );
     expect(describeAction(a ?? expect.fail(), npm.hints).steps[0]).toBe(
       'qs 6.5.5 (via request, runtime): candidate 6.5.6 addresses 1 of 1 advisory on 6.5.5 according to advisory data. Upgrade request to a version that pulls in qs 6.5.6 or later, or use an `overrides` entry in package.json.',
+    );
+  });
+
+  it('an aliased install is named, and its upgrade command keeps the alias', () => {
+    const [a] = buildFixPlan(
+      [f({ package: 'lodash', installedAs: ['lodash', 'my-lodash'], installedVersion: '4.17.20', advisoryId: 'A', ...cand('4.17.21') })],
+      scheme,
+    );
+    expect(describeAction(a ?? expect.fail(), npm.hints).steps[0]).toBe(
+      'lodash 4.17.20 (installed as lodash and my-lodash, direct, runtime): candidate 4.17.21 addresses 1 of 1 advisory on 4.17.20 according to advisory data. `npm install lodash@4.17.21` or `npm install my-lodash@npm:lodash@4.17.21`.',
     );
   });
 

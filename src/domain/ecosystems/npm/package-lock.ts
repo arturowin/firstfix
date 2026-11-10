@@ -11,6 +11,7 @@ const SCOPE_RANK: Record<Scope, number> = { runtime: 2, optional: 1, dev: 0 };
 const NODE_MODULES = 'node_modules/';
 
 interface RawEntry {
+  name?: unknown;
   version?: unknown;
   resolved?: unknown;
   link?: unknown;
@@ -63,7 +64,10 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
     const entry = value as RawEntry;
     if (entry.link === true) continue; // workspace symlink: its own dependencies are listed separately
 
-    const name = path.slice(at + NODE_MODULES.length);
+    // The folder name is what the project imports; `name` is the real package when they differ
+    // (npm aliases: "my-lodash": "npm:lodash@4.17.20"). Advisories are published under the real name.
+    const folderName = path.slice(at + NODE_MODULES.length);
+    const name = typeof entry.name === 'string' && entry.name !== '' ? entry.name : folderName;
     const ver = typeof entry.version === 'string' ? entry.version : null;
 
     if (!isSupportedSource(entry.resolved) || ver === null) {
@@ -78,18 +82,21 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
     const key = `${name}@${ver}`;
     let seen = byKey.get(key);
     if (!seen) {
-      seen = { name, version: ver, scope, isDirect, directParents: [], installPaths: [], parentSet: new Set() };
+      seen = { name, installedAs: [], version: ver, scope, isDirect, directParents: [], installPaths: [], parentSet: new Set() };
       byKey.set(key, seen);
     } else {
       if (SCOPE_RANK[scope] > SCOPE_RANK[seen.scope]) seen.scope = scope;
       seen.isDirect ||= isDirect;
     }
+    if (!seen.installedAs.includes(folderName)) seen.installedAs.push(folderName);
     for (const p of reach?.parents ?? []) seen.parentSet.add(p);
     seen.installPaths.push(...(reach?.paths ?? []));
   }
 
   const packagesOut: LockedPackage[] = [...byKey.values()].map(({ parentSet, ...p }) => ({
     ...p,
+    // Only worth reporting when some install uses another name; then list every name, the real one included.
+    installedAs: p.installedAs.every((n) => n === p.name) ? [] : p.installedAs.sort(),
     directParents: [...parentSet].sort(),
     installPaths: shortestPaths(p.installPaths),
   }));

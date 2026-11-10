@@ -73,7 +73,7 @@ describe('parseLockfile', () => {
     );
     expect(r).toEqual({
       kind: 'ok',
-      packages: [{ name: 'm', version: '0.1.1', scope: 'runtime', isDirect: false, directParents: [], installPaths: [] }],
+      packages: [{ name: 'm', installedAs: [], version: '0.1.1', scope: 'runtime', isDirect: false, directParents: [], installPaths: [] }],
       uncheckable: [
         { name: 'f', version: '1.0.0', reason: 'unsupported_source' },
         { name: 'g', version: '1.0.0', reason: 'unsupported_source' },
@@ -117,6 +117,30 @@ describe('parseLockfile', () => {
   it('a top-level package not listed by the root is transitive', () => {
     const r = parseLockfile(lock({ '': {}, 'node_modules/hoisted': { version: '1.0.0' } }));
     expect(r.kind === 'ok' && r.packages[0]?.isDirect).toBe(false);
+  });
+
+  describe('npm aliases (real lockfile from npm 10: "my-lodash": "npm:lodash@4.17.20")', () => {
+    const r = parseLockfile(
+      JSON.parse(readFileSync(path.join(import.meta.dirname, '..', 'fixtures', 'lockfiles', 'alias.package-lock.json'), 'utf8')),
+    );
+
+    it('queries the real package name, keeping the alias it is installed under', () => {
+      expect(r.kind === 'ok' && r.packages.map((p) => [p.name, p.version, p.installedAs, p.isDirect])).toEqual([
+        ['lodash', '4.17.20', ['my-lodash'], true],
+        ['lodash', '4.17.21', [], true],
+      ]);
+    });
+
+    it('the same version installed under both names lists both', () => {
+      const both = parseLockfile(
+        lock({
+          '': { dependencies: { lodash: '4.17.20', 'my-lodash': 'npm:lodash@4.17.20' } },
+          'node_modules/lodash': { version: '4.17.20', resolved: reg('lodash', '4.17.20') },
+          'node_modules/my-lodash': { name: 'lodash', version: '4.17.20', resolved: reg('lodash', '4.17.20') },
+        }),
+      );
+      expect(both.kind === 'ok' && both.packages).toMatchObject([{ name: 'lodash', installedAs: ['lodash', 'my-lodash'] }]);
+    });
   });
 
   describe('as a registered lockfile format', () => {

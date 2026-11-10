@@ -12,6 +12,8 @@ import type { Scope } from './lockfile.ts';
 export interface PlanFinding {
   ecosystem: EcosystemId;
   package: string;
+  /** npm aliases etc.: the names the project uses for it, when they differ from `package`. */
+  installedAs: string[];
   installedVersion: string;
   scope: Scope;
   isDirect: boolean;
@@ -43,6 +45,7 @@ export interface CandidateStep {
 
 export interface ActionVersion {
   installedVersion: string;
+  installedAs: string[];
   scope: Scope;
   isDirect: boolean;
   directParents: string[];
@@ -141,6 +144,7 @@ function planVersion(installed: string, findings: PlanFinding[], scheme: Version
 
   return {
     installedVersion: installed,
+    installedAs: first?.installedAs ?? [],
     scope: first?.scope ?? 'runtime',
     isDirect: first?.isDirect ?? false,
     directParents: first?.directParents ?? [],

@@ -36,6 +36,7 @@ export interface ScanView {
 export interface FindingInput {
   ecosystem: EcosystemId;
   package: string;
+  installedAs: string[];
   installedVersion: string;
   scope: Scope;
   isDirect: boolean;
@@ -49,6 +50,7 @@ export interface FindingInput {
 export interface FindingView {
   ecosystem: EcosystemId;
   package: string;
+  installedAs: string[];
   installedVersion: string;
   scope: Scope;
   isDirect: boolean;

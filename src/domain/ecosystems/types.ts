@@ -17,8 +17,11 @@ export interface LockfileFormat {
 
 /** Per-ecosystem remediation wording used by the report and the coding-agent prompt. */
 export interface RemediationHints {
-  /** The command that moves a direct dependency to a version, e.g. `npm install lodash@4.17.21`. */
-  upgradeCommand(pkg: string, version: string): string;
+  /**
+   * The command that moves a direct dependency to a version, e.g. `npm install lodash@4.17.21`. `alias` is the
+   * name the project uses when it differs from the package's (npm: `npm install my-lodash@npm:lodash@4.17.21`).
+   */
+  upgradeCommand(pkg: string, version: string, alias?: string): string;
   /** Shows what pulls a package in, e.g. `npm ls qs`. */
   inspectCommand(pkg: string): string;
   /** How to move a transitive package when its direct parent can't be upgraded, e.g. npm `overrides`. */

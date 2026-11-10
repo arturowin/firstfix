@@ -99,6 +99,29 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
     expect(report?.unchecked).toEqual([{ ecosystem: 'npm', package: 'g', version: '1.0.0', reason: 'unsupported_source' }]);
   });
 
+  it('an npm alias is looked up under its real package name (no false clean result)', async () => {
+    const id = await newScan();
+    const asked: unknown[] = [];
+    const aliased = lockfile({
+      '': { dependencies: { 'my-lodash': 'npm:lodash@4.17.20' } },
+      'node_modules/my-lodash': { name: 'lodash', version: '4.17.20', resolved: 'https://registry.npmjs.org/lodash/-/lodash-4.17.20.tgz' },
+    });
+    const pipeline = new ScanPipeline({
+      scans,
+      source: source(aliased),
+      vulns: {
+        source: { name: 'Test advisories', url: 'https://advisories.test' },
+        lookup: (pkgs) => {
+          asked.push(...pkgs);
+          return Promise.resolve(new Map([['npm:lodash@4.17.20', [advisory('GHSA-1')]]]));
+        },
+      },
+    });
+    expect(await pipeline.run(id, signal())).toBe('completed');
+    expect(asked).toEqual([{ ecosystem: 'npm', name: 'lodash', version: '4.17.20' }]);
+    expect((await scans.getReport(id))?.findings).toMatchObject([{ package: 'lodash', installedAs: ['my-lodash'], isDirect: true }]);
+  });
+
   it('zero dependencies → completed with nothing to check', async () => {
     const id = await newScan();
     const pipeline = new ScanPipeline({ scans, source: source(lockfile({})), vulns: vulns(new Map()) });

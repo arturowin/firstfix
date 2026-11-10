@@ -89,6 +89,7 @@ export class ScanPipeline {
         return {
           ecosystem,
           package: p.name,
+          installedAs: p.installedAs,
           installedVersion: p.version,
           scope: p.scope,
           isDirect: p.isDirect,
@@ -137,6 +138,7 @@ function toPlanFinding(f: FindingInput): PlanFinding {
   return {
     ecosystem: f.ecosystem,
     package: f.package,
+    installedAs: f.installedAs,
     installedVersion: f.installedVersion,
     scope: f.scope,
     isDirect: f.isDirect,

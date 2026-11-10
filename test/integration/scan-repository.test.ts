@@ -35,6 +35,7 @@ describe('PostgresScanRepository: attempt ownership', () => {
       {
         ecosystem: 'npm',
         package: 'lodash',
+        installedAs: ['lodash', 'my-lodash'],
         installedVersion: '4.17.20',
         scope: 'runtime',
         isDirect: true,
@@ -98,6 +99,7 @@ describe('PostgresScanRepository: attempt ownership', () => {
       {
         ecosystem: 'npm',
         package: 'lodash',
+        installedAs: ['lodash', 'my-lodash'],
         installedVersion: '4.17.20',
         scope: 'runtime',
         isDirect: true,

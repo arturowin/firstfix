@@ -16,8 +16,9 @@ function list(items: readonly string[]): string {
 }
 
 function where(v: ActionVersion): string {
+  const alias = v.installedAs.length > 0 ? `installed as ${list(v.installedAs)}, ` : '';
   const how = v.isDirect ? 'direct' : v.directParents.length > 0 ? `via ${list(v.directParents)}` : 'transitive';
-  return `${how}, ${v.scope}`;
+  return `${alias}${how}, ${v.scope}`;
 }
 
 export interface SummaryInput {
@@ -92,7 +93,9 @@ export function describeAction(a: Action, hints: RemediationHints): ActionText {
     }
     if (v.candidate) {
       const route = v.isDirect
-        ? `\`${hints.upgradeCommand(a.package, v.candidate.version)}\``
+        ? v.installedAs.length > 0
+          ? v.installedAs.map((alias) => `\`${hints.upgradeCommand(a.package, v.candidate?.version ?? '', alias)}\``).join(' or ')
+          : `\`${hints.upgradeCommand(a.package, v.candidate.version)}\``
         : `upgrade ${list(v.directParents)} to a version that pulls in ${a.package} ${v.candidate.version} or later, or use ${hints.transitiveFix}`;
       steps.push(`${at}: ${candidateText(v.installedVersion, v.candidate, v.advisories.length)}. ${capitalize(route)}.`);
       if (v.candidate.majorJump) {

@@ -6,7 +6,13 @@ export type Scope = 'runtime' | 'optional' | 'dev';
 
 /** One installed package@version, aggregated over every place it is installed. */
 export interface LockedPackage {
+  /** Canonical package name: the one advisories are published under. */
   name: string;
+  /**
+   * Every name it is installed under, sorted, when one differs from `name` (npm aliases, e.g. "my-lodash" for
+   * npm:lodash@4.17.20); empty when it is only installed under its own name.
+   */
+  installedAs: string[];
   version: string;
   /** Most exposed scope across install locations: runtime > optional > dev. */
   scope: Scope;
