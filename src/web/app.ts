@@ -316,7 +316,9 @@ function severityTag(severity: Severity, malicious: boolean): HTMLElement {
 function actionCard(a: ActionJson, findings: FindingJson[]): HTMLElement {
   const card = el('article', undefined, `action action-${a.kind}`);
   const head = el('div', undefined, 'action-head');
-  head.append(el('span', String(a.rank), 'rank'), severityTag(a.severity, a.isMalicious), el('span', KIND_LABEL[a.kind], 'kind'));
+  head.append(el('span', String(a.rank), 'rank'), severityTag(a.severity, a.isMalicious));
+  // The malicious tag already says it; repeating "Malicious" beside it adds nothing.
+  if (!a.isMalicious) head.append(el('span', KIND_LABEL[a.kind], 'kind'));
   card.append(head);
   if (a.text) {
     card.append(el('h3', a.text.headline));
@@ -514,9 +516,16 @@ function cleanCard(report: ReportJson): HTMLElement {
     return box;
   } else {
     const at = scan.commitSha ? ` at commit ${scan.commitSha.slice(0, 7)}` : '';
-    const partial = scan.coverage === 'partial' ? ' (partial: some dependencies could not be checked, see below)' : '';
+    const notChecked = c.totalDeps - c.checkedDeps;
+    // A partial result leads with "partial", so it never reads as clean overall.
     box.append(
-      el('p', `No known vulnerabilities in ${String(c.checkedDeps)} of ${String(c.totalDeps)} dependencies checked${at} on ${dateOf(scan)}${partial}.`, 'summary'),
+      el(
+        'p',
+        scan.coverage === 'partial'
+          ? `Partial result: no known vulnerabilities in the ${String(c.checkedDeps)} of ${String(c.totalDeps)} dependencies that could be checked${at} on ${dateOf(scan)}. ${String(notChecked)} were not checked; see below.`
+          : `No known vulnerabilities in ${String(c.checkedDeps)} of ${String(c.totalDeps)} dependencies checked${at} on ${dateOf(scan)}.`,
+        'summary',
+      ),
     );
   }
   const notes = el('ul', undefined, 'notes');

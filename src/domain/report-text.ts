@@ -160,7 +160,13 @@ export function describeAction(a: Action, hints: RemediationHints): ActionText {
 
 function whyFirst(a: Action): string {
   if (a.isMalicious) return 'Known malicious package: it can run code when installed or imported, so it outranks any vulnerability.';
-  const exposure = a.scope === 'dev' ? 'a dev dependency (not shipped at runtime)' : 'installed at runtime';
+  // Lockfile classification only: the scan doesn't see what is deployed or executed.
+  const exposure =
+    a.scope === 'dev'
+      ? 'marked as a dev dependency in the lockfile'
+      : a.scope === 'optional'
+        ? 'marked as an optional runtime dependency in the lockfile'
+        : 'marked as a runtime dependency in the lockfile';
   const how = a.isDirect ? 'declared directly by the project' : 'pulled in transitively';
   return `${capitalize(severityLabel(a.severity))} severity, ${exposure}, ${how}; ${plural(a.advisoryCount, 'advisory', 'advisories')}.`;
 }
