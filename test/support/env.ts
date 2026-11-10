@@ -13,7 +13,7 @@ export interface TestEnv {
 }
 
 /** A fresh database with our schema, pg-boss installed and the scan queues created. */
-export async function createTestEnv(): Promise<TestEnv> {
+export async function createTestEnv(options: { queue?: Parameters<typeof ensureQueues>[1] } = {}): Promise<TestEnv> {
   const db = await createTestDatabase();
   const pool = new pg.Pool({ connectionString: db.url });
   await migrate(pool, path.join(import.meta.dirname, '..', '..', 'migrations'));
@@ -22,7 +22,7 @@ export async function createTestEnv(): Promise<TestEnv> {
     console.error('pg-boss error', err);
   });
   await boss.start();
-  await ensureQueues(boss);
+  await ensureQueues(boss, options.queue);
   return {
     db,
     pool,

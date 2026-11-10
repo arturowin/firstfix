@@ -19,13 +19,17 @@ export const SCAN_QUEUE_OPTIONS: Omit<Queue, 'name'> = {
   deadLetter: SCAN_DEAD_LETTER_QUEUE,
 };
 
-/** Idempotent: safe to call from both processes on every start. */
-export async function ensureQueues(boss: PgBoss): Promise<void> {
+/**
+ * Idempotent: safe to call from both processes on every start. `overrides` exists for the failure tests
+ * (short heartbeats, no backoff); production always uses SCAN_QUEUE_OPTIONS.
+ */
+export async function ensureQueues(boss: PgBoss, overrides: Partial<Omit<Queue, 'name'>> = {}): Promise<void> {
+  const options = { ...SCAN_QUEUE_OPTIONS, ...overrides };
   if (!(await boss.getQueue(SCAN_DEAD_LETTER_QUEUE))) await boss.createQueue(SCAN_DEAD_LETTER_QUEUE);
   if (await boss.getQueue(SCAN_QUEUE)) {
-    await boss.updateQueue(SCAN_QUEUE, SCAN_QUEUE_OPTIONS);
+    await boss.updateQueue(SCAN_QUEUE, options);
   } else {
-    await boss.createQueue(SCAN_QUEUE, SCAN_QUEUE_OPTIONS);
+    await boss.createQueue(SCAN_QUEUE, options);
   }
 }
 

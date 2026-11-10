@@ -125,6 +125,13 @@ export interface ScanRepository {
    * Only from `running` and only for the owning attempt; the next claim sets `running` again.
    */
   markRetrying(claim: ClaimedScan, reason: { code: string; message: string }): Promise<boolean>;
+  /**
+   * For scans whose attempts are gone (dead-lettered job, sweeper): `failed` + reason if still non-terminal,
+   * regardless of attempt, and bumps `attempt` so a zombie worker's later writes match nothing.
+   */
+  failIfOpen(scanId: string, reason: { code: string; message: string }): Promise<boolean>;
+  /** Non-terminal scans not updated for `olderThanSeconds`, oldest first. */
+  findStale(olderThanSeconds: number, limit: number): Promise<string[]>;
   /** Terminal outcome without findings. */
   finish(
     claim: ClaimedScan,

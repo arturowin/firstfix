@@ -288,6 +288,26 @@ export class PostgresScanRepository implements ScanRepository {
     });
   }
 
+  async failIfOpen(scanId: string, reason: { code: string; message: string }): Promise<boolean> {
+    const res = await this.pool.query(
+      `UPDATE scans SET status = 'failed', attempt = attempt + 1, error_code = $2, error_message = $3
+        WHERE id = $1 AND status NOT IN ${TERMINAL}`,
+      [scanId, reason.code, reason.message],
+    );
+    return res.rowCount === 1;
+  }
+
+  async findStale(olderThanSeconds: number, limit: number): Promise<string[]> {
+    // Uses the partial index on updated_at for non-terminal rows (migration 001).
+    const { rows } = await this.pool.query<{ id: string }>(
+      `SELECT id FROM scans
+        WHERE status NOT IN ${TERMINAL} AND updated_at < now() - make_interval(secs => $1)
+        ORDER BY updated_at LIMIT $2`,
+      [olderThanSeconds, limit],
+    );
+    return rows.map((r) => r.id);
+  }
+
   async markRetrying(claim: ClaimedScan, reason: { code: string; message: string }): Promise<boolean> {
     const res = await this.pool.query(
       `UPDATE scans SET status = 'retrying', error_code = $3, error_message = $4

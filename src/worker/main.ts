@@ -6,7 +6,9 @@ import { createPool } from '../adapters/postgres/pool.ts';
 import { PostgresScanRepository } from '../adapters/postgres/scan-repository.ts';
 import { ensureQueues, SCAN_QUEUE } from '../adapters/pgboss/queue.ts';
 import { ScanPipeline } from '../application/scan-pipeline.ts';
-import { startScanWorker } from './scan-worker.ts';
+import { startScanWorker, startSweeper } from './scan-worker.ts';
+import { Sweeper } from '../application/lost-scans.ts';
+import { PgBossJobQueue } from '../adapters/pgboss/job-queue.ts';
 import { TemplateExplainer } from '../adapters/template-explainer.ts';
 import { LlmExplainer } from '../adapters/llm/explainer.ts';
 import { llmClientFromEnv, llmTimeoutMs } from '../adapters/llm/registry.ts';
@@ -30,8 +32,9 @@ await ensureQueues(boss);
 const llm = llmClientFromEnv(process.env);
 console.log(JSON.stringify({ msg: 'explanations', llm: llm ? `${llm.provider}/${llm.model}` : 'none (template only)' }));
 
+const scans = new PostgresScanRepository(pool);
 const pipeline = new ScanPipeline({
-  scans: new PostgresScanRepository(pool),
+  scans,
   source: new GitHubRepoSource({ token: process.env['GITHUB_TOKEN'] || undefined }),
   vulns: new OsvVulnDatabase(),
   explain: {
@@ -41,13 +44,18 @@ const pipeline = new ScanPipeline({
   },
 });
 
-await startScanWorker(boss, {
-  pipeline,
-  concurrency,
-  log: (entry) => {
-    console.log(JSON.stringify(entry));
-  },
-});
+const log = (entry: Record<string, unknown>) => {
+  console.log(JSON.stringify(entry));
+};
+await startScanWorker(boss, { pipeline, scans, concurrency, log });
+
+// Safety net for scans whose job is gone. Staleness = longer than one attempt can take (expireInSeconds 300)
+// plus retry backoff and a margin; the job's state in pg-boss decides, not the clock.
+const stopSweeper = startSweeper(
+  new Sweeper({ scans, jobs: new PgBossJobQueue(boss), staleAfterSeconds: Number(process.env['SWEEP_STALE_AFTER_SECONDS'] ?? 600) }),
+  Number(process.env['SWEEP_INTERVAL_MS'] ?? 60_000),
+  log,
+);
 console.log(`worker: listening on queue "${SCAN_QUEUE}" (concurrency ${concurrency})`);
 
 let stopping = false;
@@ -55,6 +63,7 @@ async function shutdown(signal: string): Promise<void> {
   if (stopping) return;
   stopping = true;
   console.log(`worker: ${signal}, finishing in-flight scans`);
+  stopSweeper();
   // Graceful: in-flight jobs get up to 30 s; anything cut off is retried via heartbeat/expiry.
   await boss.stop({ graceful: true, timeout: 30_000 });
   await pool.end();
