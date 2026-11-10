@@ -114,6 +114,15 @@ function matchPath(pattern: string[], path: string[], budget: Budget): boolean |
   return next[0] === 1;
 }
 
+/**
+ * A clean path inside the repository, as lockfile keys are written: `a/b`, no leading `/`, no `./`, `..`, empty
+ * segments, backslashes or drive letters. Anything else can't be one of the project's workspace folders.
+ */
+export function isRepoRelativePath(location: string): boolean {
+  if (location === '' || location.includes('\\') || /^[A-Za-z]:/.test(location)) return false;
+  return location.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
+}
+
 export function workspaceMatcher(rootEntry: unknown): (location: string) => boolean {
   const patterns = patternsOf(rootEntry).map(segments);
   const budget: Budget = { left: MAX_MATCH_WORK };
@@ -124,8 +133,8 @@ export function workspaceMatcher(rootEntry: unknown): (location: string) => bool
     if (cached !== undefined) return cached;
     let result = false;
     const path = segments(location);
-    // The project root and anything outside the repository are never workspaces.
-    if (location !== '' && path.length > 0 && !path.includes('..')) {
+    // The project root and anything not a clean repo-relative path are never workspaces.
+    if (isRepoRelativePath(location) && path.length > 0) {
       for (const pattern of patterns) {
         if (budget.left <= 0) break; // spent: "not a workspace" without starting (or allocating) anything
         const m = matchPath(pattern, path, budget);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parsePackageLock } from '../../src/domain/ecosystems/npm/package-lock.ts';
-import { workspaceMatcher } from '../../src/domain/ecosystems/npm/workspaces.ts';
+import { isRepoRelativePath, workspaceMatcher } from '../../src/domain/ecosystems/npm/workspaces.ts';
 
 const timed = <T>(fn: () => T): { value: T; ms: number } => {
   const t = performance.now();
@@ -105,6 +105,43 @@ describe('workspace globs: memory bounded before allocation (review finding)', (
       },
     });
     expect(r.kind === 'ok' && r.uncheckable).toEqual([{ name: 'huge-ws', version: '1.0.0', reason: 'unsupported_source' }]);
+  });
+});
+
+describe('only real workspace links are skipped (review finding)', () => {
+  it('a broad glob can’t hide links to absolute paths, Windows paths or targets missing from the lockfile', () => {
+    const r = parsePackageLock({
+      lockfileVersion: 3,
+      packages: {
+        '': { workspaces: ['**'] },
+        'packages/ws': { name: '@x/ws', version: '0.1.0' },
+        'node_modules/@x/ws': { resolved: 'packages/ws', link: true }, // real workspace: skipped
+        'node_modules/abs': { resolved: '/srv/lib', link: true },
+        '/srv/lib': { name: 'abs', version: '1.0.0' },
+        'node_modules/missing': { resolved: 'packages/not-in-lockfile', link: true },
+        'node_modules/win': { resolved: 'C:\\code\\lib', link: true },
+        'node_modules/dotted': { resolved: './packages/ws', link: true },
+      },
+    });
+    expect(r.kind === 'ok' && r.uncheckable.map((u) => [u.name, u.version, u.reason])).toEqual([
+      ['abs', '1.0.0', 'unsupported_source'],
+      ['dotted', null, 'unsupported_source'],
+      ['missing', null, 'unsupported_source'],
+      ['win', null, 'unsupported_source'],
+    ]);
+  });
+
+  it.each([
+    ['packages/ws', true],
+    ['/srv/lib', false],
+    ['C:/code/lib', false],
+    ['a\\b', false],
+    ['./packages/ws', false],
+    ['packages//ws', false],
+    ['packages/../ws', false],
+  ])('isRepoRelativePath(%j) = %s; the matcher agrees for "**"', (location, ok) => {
+    expect(isRepoRelativePath(location)).toBe(ok);
+    expect(workspaceMatcher({ workspaces: ['**'] })(location)).toBe(ok);
   });
 });
 

@@ -7,7 +7,7 @@ import type { LockfileFormat } from '../types.ts';
 import { buildInstallGraph, PATH_ELLIPSIS } from './graph.ts';
 import { isStorableText, storableText } from '../../text.ts';
 import { isValidNpmName } from './name.ts';
-import { workspaceMatcher } from './workspaces.ts';
+import { isRepoRelativePath, workspaceMatcher } from './workspaces.ts';
 
 const NPM_REGISTRY = 'https://registry.npmjs.org/';
 const SCOPE_RANK: Record<Scope, number> = { runtime: 2, optional: 1, dev: 0 };
@@ -70,7 +70,9 @@ export function parsePackageLock(json: unknown): ParseLockfileResult {
       // A link into one of the project's workspaces is project code. Any other link (`file:../local`, a folder
       // outside the workspaces) is a dependency we can't check against registry advisories: say so.
       const target = typeof entry.resolved === 'string' ? entry.resolved : null;
-      if (target !== null && isWorkspace(target)) continue;
+      // Workspace code only when the target is a clean repo-relative folder that exists in this lockfile and
+      // matches a workspace declaration. Absolute paths, missing targets and the like are reported, not hidden.
+      if (target !== null && isRepoRelativePath(target) && isRecord(packages[target]) && isWorkspace(target)) continue;
       const linkName = path.slice(at + NODE_MODULES.length);
       const targetEntry = target !== null ? packages[target] : undefined;
       const rawVersion = isRecord(targetEntry) && typeof targetEntry['version'] === 'string' ? targetEntry['version'] : null;
