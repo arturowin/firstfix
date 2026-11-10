@@ -389,10 +389,14 @@ Fix information shapes the action, not the rank.
   a key.
 
 ### Coding-agent handoff prompt
-Built from a template (no AI). Includes: repo, commit, packages with evidence; candidate changes
-separated from facts; instructions to inspect the dependency graph first, keep unrelated changes,
-use the ecosystem's upgrade command (npm: `npm install <pkg>@<version>`), stop and report on major-version jumps, run tests, rescan, report
-unresolved items. User sees a preview before copying.
+Built from a template (no AI), from validated structured fields only, because an agent acts on it: package
+names, aliases and parents pass the ecosystem's name rules (`RemediationHints.isValidPackageName`), versions its
+version scheme; advisory IDs, severities, scopes, the repository URL, commit and lockfile path match fixed
+formats. Advisory titles and all prose (AI or template) are left out. Anything failing validation is omitted
+with a note, which also protects scans stored before validation existed (review finding). Includes repo,
+commit, packages with evidence; candidate changes separated from facts; instructions to inspect the dependency
+graph first, keep unrelated changes, use the ecosystem's upgrade command, stop and report on major-version
+jumps, run tests, rescan, report unresolved items. User sees a preview before copying.
 
 ## Report layout (frozen order)
 1. Summary line + scan date + commit + coverage + advisory data source (coverage always beside the summary)

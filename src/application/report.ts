@@ -62,6 +62,7 @@ export function buildReport(data: ReportData, registry: EcosystemRegistry): Repo
           scannedAt: (scan.completedAt ?? scan.updatedAt).toISOString().slice(0, 10),
           actions: plan,
           hintsFor: (e) => ecosystem(e)?.hints ?? null,
+          schemeFor: (e) => ecosystem(e)?.versionScheme ?? null,
         })
       : null;
 

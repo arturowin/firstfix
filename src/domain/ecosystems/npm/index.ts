@@ -17,6 +17,7 @@ export const npm: Ecosystem = {
     },
     inspectCommand: (pkg) => (isValidNpmName(pkg) ? `npm ls ${pkg}` : null),
     upgradeTemplate: 'npm install <package>@<version>',
+    isValidPackageName: isValidNpmName,
     inspectTemplate: 'npm ls <package>',
     transitiveFix: 'an `overrides` entry in package.json',
     ciChecks: ['Dependabot alerts', '`npm audit` in CI'],

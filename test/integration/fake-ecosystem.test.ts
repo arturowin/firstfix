@@ -45,6 +45,7 @@ const fake: Ecosystem = {
     inspectCommand: (p) => `fake why ${p}`,
     upgradeTemplate: 'fake add <package>==<version>',
     inspectTemplate: 'fake why <package>',
+    isValidPackageName: (n) => /^[a-z][a-z0-9-]*$/.test(n),
     transitiveFix: 'a fake constraint',
     ciChecks: ['fake audit'],
   },

@@ -31,6 +31,11 @@ export interface RemediationHints {
    */
   upgradeTemplate: string;
   inspectTemplate: string;
+  /**
+   * Is this a package name the ecosystem's registry could hold? Used before any name goes into text a person or
+   * an agent may act on (the copied prompt), including names stored by older versions without validation.
+   */
+  isValidPackageName(name: string): boolean;
   /** How to move a transitive package when its direct parent can't be upgraded, e.g. npm `overrides`. */
   transitiveFix: string;
   /** CI checks suggested on a clean result. */
