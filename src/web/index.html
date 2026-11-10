@@ -28,7 +28,6 @@
         --shadow: 0 1px 2px rgba(11, 21, 48, 0.06), 0 8px 24px rgba(11, 21, 48, 0.06);
         --hero: radial-gradient(circle at 8% 105%, rgba(150, 236, 216, 0.95), rgba(150, 236, 216, 0) 42%),
           linear-gradient(155deg, #4a55f3 0%, #6d5cf6 42%, #8a8cf6 72%, #a9d8f0 100%);
-        --strip: linear-gradient(90deg, #6a3df0 0%, #b779e6 30%, #ee93c3 52%, #f2b4b0 66%, #c9f24b 100%);
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -57,8 +56,7 @@
       code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--soft); padding: 1px 5px; border-radius: 5px; }
       .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
 
-      /* Top strip and bar */
-      .strip { background: var(--strip); color: #fff; text-align: center; font-size: 13.5px; font-weight: 500; padding: 9px 16px; text-shadow: 0 1px 2px rgba(40, 20, 90, 0.35); }
+      /* Top bar */
       .topbar { background: var(--card); border-bottom: 1px solid var(--line); }
       .topbar .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; gap: 12px; }
       .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 800; font-size: 18px; letter-spacing: -0.01em; text-decoration: none; }
@@ -176,7 +174,6 @@
     </style>
   </head>
   <body>
-    <div class="strip">Facts come from the scan. AI only explains them.</div>
     <header class="topbar">
       <div class="wrap">
         <a class="brand" href="/"><span class="mark" aria-hidden="true"></span>AI Scan Review</a>
