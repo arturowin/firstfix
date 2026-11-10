@@ -1,5 +1,5 @@
 import { TransientError } from '../../ports/errors.ts';
-import { packageKey, type AdvisoryLookup, type PackageRef, type VulnDatabase } from '../../ports/vuln-database.ts';
+import { packageKey, type LookupResult, type PackageRef, type VulnDatabase } from '../../ports/vuln-database.ts';
 import { fetchWithTimeout, USER_AGENT } from '../http.ts';
 import { toAdvisory, type OsvVuln } from './translate.ts';
 
@@ -9,6 +9,8 @@ export interface OsvOptions {
   /** OSV's documented maximum is 1000 queries per batch. */
   batchSize?: number;
   detailConcurrency?: number;
+  /** Pause before the one retry of a failed call. */
+  retryDelayMs?: number;
 }
 
 interface BatchQuery {
@@ -28,37 +30,55 @@ export class OsvVulnDatabase implements VulnDatabase {
   private readonly timeoutMs: number;
   private readonly batchSize: number;
   private readonly detailConcurrency: number;
+  private readonly retryDelayMs: number;
 
   constructor(options: OsvOptions = {}) {
     this.baseUrl = options.baseUrl ?? 'https://api.osv.dev';
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.batchSize = options.batchSize ?? 1000;
     this.detailConcurrency = options.detailConcurrency ?? 8;
+    this.retryDelayMs = options.retryDelayMs ?? 500;
   }
 
-  async lookup(packages: PackageRef[], signal: AbortSignal): Promise<AdvisoryLookup> {
-    const idsByPackage = await this.queryIds(packages, signal);
+  async lookup(packages: PackageRef[], signal: AbortSignal): Promise<LookupResult> {
+    const { ids: idsByPackage, failed } = await this.queryIds(packages, signal);
 
+    // Details once per advisory id, shared across packages; a failed id fails every package that cites it.
     const uniqueIds = [...new Set([...idsByPackage.values()].flat())].sort();
     const details = new Map<string, OsvVuln>();
+    const failedIds = new Set<string>();
     await mapWithConcurrency(uniqueIds, this.detailConcurrency, async (id) => {
-      details.set(id, await this.fetchVuln(id, signal));
+      try {
+        details.set(id, await this.withRetry(() => this.fetchVuln(id, signal), signal));
+      } catch (err) {
+        if (signal.aborted) throw err;
+        failedIds.add(id);
+      }
     });
 
-    const result: AdvisoryLookup = new Map();
+    const result: LookupResult = { advisories: new Map(), failed: [] };
     for (const pkg of packages) {
-      const ids = idsByPackage.get(packageKey(pkg)) ?? [];
+      const key = packageKey(pkg);
+      const ids = idsByPackage.get(key) ?? [];
+      if (failed.has(key) || ids.some((id) => failedIds.has(id))) {
+        result.failed.push(pkg);
+        continue;
+      }
       if (ids.length === 0) continue;
-      result.set(
-        packageKey(pkg),
+      result.advisories.set(
+        key,
         ids.map((id) => toAdvisory(details.get(id) ?? { id }, pkg)),
       );
     }
     return result;
   }
 
-  private async queryIds(packages: PackageRef[], signal: AbortSignal): Promise<Map<string, string[]>> {
+  private async queryIds(
+    packages: PackageRef[],
+    signal: AbortSignal,
+  ): Promise<{ ids: Map<string, string[]>; failed: Set<string> }> {
     const ids = new Map<string, string[]>();
+    const failed = new Set<string>();
     let pending: { pkg: PackageRef; pageToken?: string }[] = packages.map((pkg) => ({ pkg }));
 
     // Each round sends at most batchSize queries; queries that returned a page token go into the next round.
@@ -72,12 +92,23 @@ export class OsvVulnDatabase implements VulnDatabase {
           version: pkg.version,
           ...(pageToken ? { page_token: pageToken } : {}),
         }));
-        const res = await this.post('/v1/querybatch', { queries }, signal);
-        const body = (await res.json()) as { results?: BatchResult[] };
-        if (!Array.isArray(body.results) || body.results.length !== chunk.length) {
-          throw new TransientError('osv_bad_response', 'OSV returned a batch result that does not match the query');
+        let results: BatchResult[];
+        try {
+          results = await this.withRetry(async () => {
+            const res = await this.post('/v1/querybatch', { queries }, signal);
+            const body = (await res.json()) as { results?: BatchResult[] };
+            if (!Array.isArray(body.results) || body.results.length !== chunk.length) {
+              throw new TransientError('osv_bad_response', 'OSV returned a batch result that does not match the query');
+            }
+            return body.results;
+          }, signal);
+        } catch (err) {
+          if (signal.aborted) throw err;
+          // This chunk (or this page of it) couldn't be checked; other chunks still count.
+          for (const { pkg } of chunk) failed.add(packageKey(pkg));
+          continue;
         }
-        body.results.forEach((r, j) => {
+        results.forEach((r, j) => {
           const entry = chunk[j];
           if (!entry) return;
           const key = packageKey(entry.pkg);
@@ -89,7 +120,19 @@ export class OsvVulnDatabase implements VulnDatabase {
       }
       pending = next;
     }
-    return ids;
+    return { ids, failed };
+  }
+
+  /** One quick retry per call: a single dropped request shouldn't cost a package its check. */
+  private async withRetry<T>(call: () => Promise<T>, signal: AbortSignal): Promise<T> {
+    try {
+      return await call();
+    } catch (err) {
+      if (signal.aborted) throw err;
+      await new Promise((r) => setTimeout(r, this.retryDelayMs));
+      signal.throwIfAborted();
+      return call();
+    }
   }
 
   private async fetchVuln(id: string, signal: AbortSignal): Promise<OsvVuln> {
@@ -114,7 +157,7 @@ export class OsvVulnDatabase implements VulnDatabase {
       service: 'osv',
     });
     if (!res.ok) {
-      // Any OSV failure is retried as a whole for now; partial coverage is M4.
+      // Failures are counted per package by lookup(); this error never leaves the adapter.
       throw new TransientError('osv_unavailable', `OSV answered ${res.status} for ${path}`);
     }
     return res;

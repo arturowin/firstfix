@@ -231,9 +231,12 @@ OSV.dev is the only advisory source implemented. It sits behind the `VulnDatabas
 
 - **Contract:** for each `{ ecosystem, name, version }` the source returns its advisories, each with:
   `id`, `aliases`, `title`, `severity` (`critical|high|medium|low|unknown`), `isMalicious`, `affectedRanges`
-  (neutral type below), `references`. Packages it could not check are reported per package, so coverage can be
-  partial (per-package failures: M4; until then any failure is a `TransientError`). Errors follow
-  `ports/errors.ts`: transient vs permanent, never provider HTTP codes.
+  (neutral type below), `references`. Packages it could not check are reported per package
+  (`lookup` → `{ advisories, failed }`), so coverage can be partial; it rejects only when the job's signal
+  aborts, never with provider HTTP errors. The OSV adapter retries each call once; a failed batch fails its
+  packages, a failed detail fetch fails every package citing that advisory.
+- Pipeline: some failed → `completed`, `partial`, `lookup_failed` rows, `failed_lookups`, said in the summary
+  line; all failed → `TransientError` (retried; `failed` with the reason once retries run out, M4 decision).
 - **Neutral range type** (`src/domain/advisory.ts`, replaces the raw `affectedRanges: unknown[]`):
   `AffectedRange = { kind: 'range'; introduced; fixed | null; lastAffected | null } | { kind: 'versions'; versions }`.
   `introduced: '0'` = all earlier versions; `fixed: null` = no fix published; both `fixed` and `lastAffected`

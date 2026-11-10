@@ -11,12 +11,14 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Advisory } from '../../src/domain/advisory.ts';
-import { PermanentError, TransientError } from '../../src/ports/errors.ts';
 import type { PackageRef, VulnDatabase } from '../../src/ports/vuln-database.ts';
 
 export interface ContractHarness {
   create(): VulnDatabase;
-  /** The provider reports these recorded advisory ids for these packages (key: packageKey), none for others. */
+  /**
+   * The provider reports these recorded advisory ids for these packages (key: packageKey), none for others.
+   * An id with no recorded details is one the provider can't return details for.
+   */
   serveRecorded(idsByPackage: Record<string, string[]>): void;
   /** The provider reports `id` for every package, but has no details for it. */
   serveUnknownId(id: string): void;
@@ -46,7 +48,7 @@ export function vulnDatabaseContract(provider: string, harness: ContractHarness)
         .create()
         .lookup([npm('lodash', '4.17.20'), npm('request', '2.88.2'), npm('axios', '0.21.1'), npm('flatmap-stream', '0.1.1')], signal());
 
-      expect(lookup.get('npm:lodash@4.17.20')).toEqual([
+      expect(lookup.advisories.get('npm:lodash@4.17.20')).toEqual([
         expect.objectContaining<Partial<Advisory>>({
           id: 'GHSA-29mw-wpgm-hmr9',
           severity: 'medium',
@@ -54,16 +56,16 @@ export function vulnDatabaseContract(provider: string, harness: ContractHarness)
           affectedRanges: [{ kind: 'range', introduced: '4.0.0', fixed: '4.17.21', lastAffected: null }],
         }),
       ]);
-      expect(lookup.get('npm:request@2.88.2')?.[0]?.affectedRanges).toEqual([
+      expect(lookup.advisories.get('npm:request@2.88.2')?.[0]?.affectedRanges).toEqual([
         { kind: 'range', introduced: '0', fixed: null, lastAffected: '2.88.2' },
       ]);
-      expect(lookup.get('npm:axios@0.21.1')?.[0]?.affectedRanges).toEqual(
+      expect(lookup.advisories.get('npm:axios@0.21.1')?.[0]?.affectedRanges).toEqual(
         expect.arrayContaining([
           { kind: 'range', introduced: '1.0.0', fixed: '1.6.0', lastAffected: null },
           { kind: 'range', introduced: '0.8.1', fixed: '0.28.0', lastAffected: null },
         ]),
       );
-      expect(lookup.get('npm:flatmap-stream@0.1.1')?.[0]).toMatchObject({
+      expect(lookup.advisories.get('npm:flatmap-stream@0.1.1')?.[0]).toMatchObject({
         severity: 'critical',
         isMalicious: true,
         affectedRanges: [{ kind: 'versions', versions: ['0.1.1'] }],
@@ -73,7 +75,7 @@ export function vulnDatabaseContract(provider: string, harness: ContractHarness)
     it('a package with no advisories is absent', async () => {
       harness.serveRecorded({});
       const lookup = await harness.create().lookup([npm('left-pad', '1.3.0')], signal());
-      expect(lookup.size).toBe(0);
+      expect(lookup.advisories.size).toBe(0);
     });
 
     it('filters by ecosystem and exact name', async () => {
@@ -89,29 +91,44 @@ export function vulnDatabaseContract(provider: string, harness: ContractHarness)
           signal(),
         );
       const fixed = [{ kind: 'range', introduced: '4.0.0', fixed: '4.17.21', lastAffected: null }];
-      expect(lookup.get('npm:lodash-es@4.17.20')?.[0]?.affectedRanges).toEqual(fixed);
-      expect(lookup.get('RubyGems:lodash-rails@4.17.20')?.[0]?.affectedRanges).toEqual(fixed);
+      expect(lookup.advisories.get('npm:lodash-es@4.17.20')?.[0]?.affectedRanges).toEqual(fixed);
+      expect(lookup.advisories.get('RubyGems:lodash-rails@4.17.20')?.[0]?.affectedRanges).toEqual(fixed);
       // The advisory covers lodash-rails only on RubyGems: nothing applies to an npm package of that name.
-      expect(lookup.get('npm:lodash-rails@4.17.20')?.[0]?.affectedRanges ?? []).toEqual([]);
+      expect(lookup.advisories.get('npm:lodash-rails@4.17.20')?.[0]?.affectedRanges ?? []).toEqual([]);
     });
 
-    it('an id the provider has no details for is a transient error, not a silent gap', async () => {
+    it('an id the provider has no details for: that package is reported failed, not silently clean', async () => {
       harness.serveUnknownId('GHSA-0000-0000-0000');
-      await expect(harness.create().lookup([npm('a', '1.0.0')], signal())).rejects.toBeInstanceOf(TransientError);
+      const r = await harness.create().lookup([npm('a', '1.0.0')], signal());
+      expect(r).toEqual({ advisories: new Map(), failed: [npm('a', '1.0.0')] });
     });
 
-    it.each(['unavailable', 'network'] as const)('provider %s → TransientError (never a raw HTTP error)', async (kind) => {
+    it('partial: a package whose advisory details fail is failed; the others are still checked', async () => {
+      harness.serveRecorded({
+        'npm:lodash@4.17.20': ['GHSA-29mw-wpgm-hmr9'],
+        'npm:a@1.0.0': ['GHSA-0000-0000-0000'], // no details recorded
+      });
+      const r = await harness.create().lookup([npm('lodash', '4.17.20'), npm('a', '1.0.0'), npm('left-pad', '1.3.0')], signal());
+      expect(r.failed).toEqual([npm('a', '1.0.0')]);
+      expect([...r.advisories.keys()]).toEqual(['npm:lodash@4.17.20']);
+    });
+
+    it.each(['unavailable', 'network'] as const)('provider %s → every package reported failed (no thrown provider error)', async (kind) => {
       harness.serveOutage(kind);
-      const err: unknown = await harness
-        .create()
-        .lookup([npm('a', '1.0.0')], signal())
-        .catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(TransientError);
-      expect(err).not.toBeInstanceOf(PermanentError);
+      const pkgs = [npm('a', '1.0.0'), npm('b', '2.0.0')];
+      const r = await harness.create().lookup(pkgs, signal());
+      expect(r).toEqual({ advisories: new Map(), failed: pkgs });
+    });
+
+    it('the caller’s abort rejects instead of reporting failures', async () => {
+      harness.serveOutage('unavailable');
+      const ctl = new AbortController();
+      ctl.abort(new Error('job stopped'));
+      await expect(harness.create().lookup([npm('a', '1.0.0')], ctl.signal)).rejects.toThrow();
     });
 
     it('no packages → empty result', async () => {
-      expect((await harness.create().lookup([], signal())).size).toBe(0);
+      expect(await harness.create().lookup([], signal())).toEqual({ advisories: new Map(), failed: [] });
     });
   });
 }

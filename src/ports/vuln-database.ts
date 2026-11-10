@@ -25,8 +25,18 @@ export interface AdvisorySourceInfo {
  * Advisory source contract (docs/ARCHITECTURE.md "Advisory source"); every adapter passes
  * test/contract/vuln-database.contract.ts. Adapters translate provider formats into domain/advisory.ts types.
  */
+export interface LookupResult {
+  /** Advisories per checked package; checked packages with none are absent. */
+  advisories: AdvisoryLookup;
+  /** Packages the source could not check (its calls failed even after a retry). Never in `advisories`. */
+  failed: PackageRef[];
+}
+
 export interface VulnDatabase {
   readonly source: AdvisorySourceInfo;
-  /** Known advisories for exact package versions. Any failed call → TransientError (partial results: M4). */
-  lookup(packages: PackageRef[], signal: AbortSignal): Promise<AdvisoryLookup>;
+  /**
+   * Known advisories for exact package versions. Failures are reported per package in `failed`, so coverage can
+   * be partial; the caller decides what a total failure means. Rejects only when `signal` aborts.
+   */
+  lookup(packages: PackageRef[], signal: AbortSignal): Promise<LookupResult>;
 }

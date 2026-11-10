@@ -4,7 +4,6 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { OsvVulnDatabase } from '../../src/adapters/osv/vuln-database.ts';
-import { TransientError } from '../../src/ports/errors.ts';
 import { vulnDatabaseContract } from './vuln-database.contract.ts';
 
 const OSV = 'https://api.osv.dev';
@@ -74,9 +73,9 @@ describe('OsvVulnDatabase', () => {
     const lookup = await new OsvVulnDatabase().lookup(packages, signal());
 
     expect(sent).toEqual({ queries: pick.map((i) => req.queries[i]) });
-    expect(lookup.has('npm:left-pad@1.3.0')).toBe(false);
+    expect(lookup.advisories.has('npm:left-pad@1.3.0')).toBe(false);
 
-    const request = lookup.get('npm:request@2.88.2');
+    const request = lookup.advisories.get('npm:request@2.88.2');
     expect(request).toEqual([
       {
         id: 'GHSA-p8p7-x288-28g6',
@@ -90,7 +89,7 @@ describe('OsvVulnDatabase', () => {
       },
     ]);
 
-    const flatmap = lookup.get('npm:flatmap-stream@0.1.1') ?? [];
+    const flatmap = lookup.advisories.get('npm:flatmap-stream@0.1.1') ?? [];
     expect(flatmap.map((a) => [a.id, a.severity, a.isMalicious]).sort()).toEqual([
       ['GHSA-9x64-5r7x-2q53', 'critical', true], // CWE-506
       ['GHSA-mh6f-8j2x-4483', 'critical', true], // CWE-506
@@ -112,7 +111,7 @@ describe('OsvVulnDatabase', () => {
     const pkgs = ['a', 'b', 'c', 'd', 'e'].map((name) => ({ ecosystem: 'npm', name, version: '1.0.0' }));
     const lookup = await new OsvVulnDatabase({ batchSize: 2 }).lookup(pkgs, signal());
     expect(batches).toEqual([['a', 'b'], ['c', 'd'], ['e']]);
-    for (const p of pkgs) expect(lookup.get(`npm:${p.name}@1.0.0`)?.map((a) => a.id)).toEqual([`ID-${p.name}`]);
+    for (const p of pkgs) expect(lookup.advisories.get(`npm:${p.name}@1.0.0`)?.map((a) => a.id)).toEqual([`ID-${p.name}`]);
   });
 
   it('follows next_page_token by re-sending only the paginated query (recorded pagination shape)', async () => {
@@ -144,10 +143,10 @@ describe('OsvVulnDatabase', () => {
 
     expect(rounds.map((r) => r.length)).toEqual([2, 1, 1]);
     expect(rounds[1]?.[0]).toMatchObject({ package: { name: 'big' }, page_token: token1 });
-    const big = lookup.get('npm:big@1.0.0')?.map((a) => a.id) ?? [];
+    const big = lookup.advisories.get('npm:big@1.0.0')?.map((a) => a.id) ?? [];
     expect(big).toHaveLength(3 + 3 + 1);
     expect(new Set(big).size).toBe(big.length); // pages don't overlap
-    expect(lookup.get('npm:lodash@4.17.20')).toHaveLength(4);
+    expect(lookup.advisories.get('npm:lodash@4.17.20')).toHaveLength(4);
   });
 
   it('fetches each advisory once, even when several packages share it', async () => {
@@ -168,8 +167,8 @@ describe('OsvVulnDatabase', () => {
     );
     expect(calls.get('GHSA-29mw-wpgm-hmr9')).toBe(1);
     // same advisory, different package → ranges filtered per package
-    expect(lookup.get('npm:lodash@4.17.20')?.[0]?.affectedRanges).toHaveLength(1);
-    expect(lookup.get('npm:lodash-es@4.17.20')?.[0]?.affectedRanges).toHaveLength(1);
+    expect(lookup.advisories.get('npm:lodash@4.17.20')?.[0]?.affectedRanges).toHaveLength(1);
+    expect(lookup.advisories.get('npm:lodash-es@4.17.20')?.[0]?.affectedRanges).toHaveLength(1);
   });
 
   it('passes the ecosystem through and filters `affected` by ecosystem and exact name', async () => {
@@ -193,42 +192,75 @@ describe('OsvVulnDatabase', () => {
       { ecosystem: 'RubyGems', name: 'lodash-rails' },
       { ecosystem: 'npm', name: 'lodash-rails' },
     ]);
-    expect(lookup.get('RubyGems:lodash-rails@4.17.20')?.[0]?.affectedRanges).toEqual([
+    expect(lookup.advisories.get('RubyGems:lodash-rails@4.17.20')?.[0]?.affectedRanges).toEqual([
       { kind: 'range', introduced: '4.0.0', fixed: '4.17.21', lastAffected: null },
     ]);
-    expect(lookup.get('npm:lodash-rails@4.17.20')?.[0]?.affectedRanges).toEqual([]);
+    expect(lookup.advisories.get('npm:lodash-rails@4.17.20')?.[0]?.affectedRanges).toEqual([]);
   });
+
+  const pkg = (name: string) => ({ ecosystem: 'npm', name, version: '1.0.0' });
 
   it.each([
-    ['batch 503', () => new HttpResponse(null, { status: 503 }), 'osv_unavailable'],
-    ['batch result count mismatch', () => HttpResponse.json({ results: [] }), 'osv_bad_response'],
-    ['network error', () => HttpResponse.error(), 'osv_unreachable'],
-  ])('transient: %s', async (_label, respond, code) => {
-    server.use(http.post(`${OSV}/v1/querybatch`, respond));
-    const err: unknown = await new OsvVulnDatabase()
-      .lookup([{ ecosystem: 'npm', name: 'a', version: '1.0.0' }], signal())
-      .catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(TransientError);
-    expect(err).toMatchObject({ code });
+    ['batch 503', () => new HttpResponse(null, { status: 503 })],
+    ['batch result count mismatch', () => HttpResponse.json({ results: [] })],
+    ['network error', () => HttpResponse.error()],
+  ])('%s, twice → the batch’s packages are failed after exactly one retry', async (_label, respond) => {
+    let calls = 0;
+    server.use(
+      http.post(`${OSV}/v1/querybatch`, () => {
+        calls++;
+        return respond();
+      }),
+    );
+    const r = await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([pkg('a')], signal());
+    expect(r).toEqual({ advisories: new Map(), failed: [pkg('a')] });
+    expect(calls).toBe(2);
   });
 
-  it('a failed detail call is transient', async () => {
+  it('one dropped call is absorbed by the retry', async () => {
+    let calls = 0;
     server.use(
-      http.post(`${OSV}/v1/querybatch`, () => HttpResponse.json({ results: [{ vulns: [{ id: 'X-1' }] }] })),
-      http.get(`${OSV}/v1/vulns/:id`, () => new HttpResponse(null, { status: 500 })),
+      http.post(`${OSV}/v1/querybatch`, () =>
+        ++calls === 1 ? new HttpResponse(null, { status: 503 }) : HttpResponse.json({ results: [{}] }),
+      ),
     );
-    await expect(new OsvVulnDatabase().lookup([{ ecosystem: 'npm', name: 'a', version: '1.0.0' }], signal())).rejects.toBeInstanceOf(
-      TransientError,
+    expect(await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([pkg('a')], signal())).toEqual({ advisories: new Map(), failed: [] });
+  });
+
+  it('one failing chunk fails only its packages; other chunks are checked', async () => {
+    server.use(
+      http.post(`${OSV}/v1/querybatch`, async ({ request }) => {
+        const { queries } = (await request.json()) as Batch;
+        if (queries.some((q) => q.package.name === 'c')) return new HttpResponse(null, { status: 500 });
+        return HttpResponse.json({ results: queries.map(() => ({ vulns: [{ id: 'GHSA-29mw-wpgm-hmr9' }] })) });
+      }),
     );
+    serveVulnFixtures(new Map());
+    const r = await new OsvVulnDatabase({ batchSize: 2, retryDelayMs: 0 }).lookup(['a', 'b', 'c', 'd'].map(pkg), signal());
+    expect(r.failed).toEqual([pkg('c'), pkg('d')]);
+    expect([...r.advisories.keys()]).toEqual(['npm:a@1.0.0', 'npm:b@1.0.0']);
+  });
+
+  it('a failing detail call fails every package citing that advisory, and only those', async () => {
+    serveVulnFixtures(new Map()); // registered first: msw tries the later BAD-1 handler before it
+    server.use(
+      http.post(`${OSV}/v1/querybatch`, () =>
+        HttpResponse.json({ results: [{ vulns: [{ id: 'BAD-1' }] }, { vulns: [{ id: 'BAD-1' }, { id: 'GHSA-29mw-wpgm-hmr9' }] }, { vulns: [{ id: 'GHSA-29mw-wpgm-hmr9' }] }] }),
+      ),
+      http.get(`${OSV}/v1/vulns/BAD-1`, () => new HttpResponse(null, { status: 500 })),
+    );
+    const r = await new OsvVulnDatabase({ retryDelayMs: 0 }).lookup([pkg('a'), pkg('b'), pkg('c')], signal());
+    expect(r.failed).toEqual([pkg('a'), pkg('b')]);
+    expect([...r.advisories.keys()]).toEqual(['npm:c@1.0.0']);
   });
 
   it('no packages → no calls', async () => {
-    expect((await new OsvVulnDatabase().lookup([], signal())).size).toBe(0);
+    expect(await new OsvVulnDatabase().lookup([], signal())).toEqual({ advisories: new Map(), failed: [] });
   });
 });
 
 vulnDatabaseContract('OSV.dev', {
-  create: () => new OsvVulnDatabase(),
+  create: () => new OsvVulnDatabase({ retryDelayMs: 0 }),
   serveRecorded(idsByPackage) {
     server.use(
       http.post(`${OSV}/v1/querybatch`, async ({ request }) => {
@@ -240,7 +272,14 @@ vulnDatabaseContract('OSV.dev', {
           }),
         });
       }),
-      http.get(`${OSV}/v1/vulns/:id`, ({ params }) => HttpResponse.json(fixture(`${String(params['id'])}.json`))),
+      http.get(`${OSV}/v1/vulns/:id`, ({ params }) => {
+        try {
+          return HttpResponse.json(fixture(`${String(params['id'])}.json`));
+        } catch {
+          // Recorded: OSV answers an unknown id with 404.
+          return HttpResponse.json({ code: 5, message: 'Bug not found.' }, { status: 404 });
+        }
+      }),
     );
   },
   serveUnknownId(id) {

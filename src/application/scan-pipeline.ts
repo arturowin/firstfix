@@ -4,7 +4,7 @@ import { explainPlan, type ExplainDeps } from './explain.ts';
 import { summaryLine } from '../domain/report-text.ts';
 import { defaultRegistry, missingLockfileMessage } from '../domain/ecosystems/registry.ts';
 import type { EcosystemRegistry, LockfileFormat } from '../domain/ecosystems/types.ts';
-import { PermanentError } from '../ports/errors.ts';
+import { PermanentError, TransientError } from '../ports/errors.ts';
 import type { RepoSource } from '../ports/repo-source.ts';
 import type { ClaimedScan, FindingInput, ScanRepository } from '../ports/scan-repository.ts';
 import { packageKey, type VulnDatabase } from '../ports/vuln-database.ts';
@@ -85,16 +85,27 @@ export class ScanPipeline {
     });
     if (!moving) return 'stale';
 
-    const advisories = await this.vulns.lookup(
+    const { advisories, failed } = await this.vulns.lookup(
       packages.map((p) => ({ ecosystem, name: p.name, version: p.version })),
       signal,
     );
+    // Nothing could be checked: almost always the advisory source being down. Retried like any transient error;
+    // on the last attempt the scan ends failed with this reason.
+    if (packages.length > 0 && failed.length === packages.length) {
+      throw new TransientError(
+        'advisory_lookup_failed',
+        `${this.vulns.source.name} could not be reached: none of the ${String(packages.length)} dependencies could be checked`,
+      );
+    }
+    const failedKeys = new Set(failed.map(packageKey));
+    const checked = packages.filter((p) => !failedKeys.has(packageKey({ ecosystem, ...p })));
+    const lookupFailed = packages.filter((p) => failedKeys.has(packageKey({ ecosystem, ...p })));
 
-    if (!(await this.scans.recordProgress(claim, { stage: 'analyzing', counts: { checkedDeps: packages.length } }))) {
+    if (!(await this.scans.recordProgress(claim, { stage: 'analyzing', counts: { checkedDeps: checked.length } }))) {
       return 'stale';
     }
 
-    const findings: FindingInput[] = packages.flatMap((p) =>
+    const findings: FindingInput[] = checked.flatMap((p) =>
       (advisories.get(packageKey({ ecosystem, ...p })) ?? []).map((advisory): FindingInput => {
         const candidate = selectCandidate(p.version, advisory.affectedRanges, scheme);
         return {
@@ -114,7 +125,12 @@ export class ScanPipeline {
       }),
     );
 
-    const counts = { totalDeps, checkedDeps: packages.length, unsupportedDeps: uncheckable.length, failedLookups: 0 };
+    const counts = {
+      totalDeps,
+      checkedDeps: checked.length,
+      unsupportedDeps: uncheckable.length,
+      failedLookups: lookupFailed.length,
+    };
     const plan = buildFixPlan(findings.map(toPlanFinding), (e) => this.registry.ecosystems.get(e)?.versionScheme ?? null);
 
     const line = summaryLine({ counts, lockfilePath: found.path, actions: plan });
@@ -131,11 +147,14 @@ export class ScanPipeline {
       summaryLine: line,
       explanation,
       counts,
-      // "full" = every supported dependency in the root lockfile was checked (unsupported sources are listed
-      // separately). Partial coverage from failed lookups arrives in M4.
-      coverage: 'full',
+      // "full" = every supported dependency in the lockfile was checked (unsupported sources are listed
+      // separately); "partial" = some lookups failed, and those are listed as unchecked.
+      coverage: lookupFailed.length > 0 ? 'partial' : 'full',
       findings,
-      unchecked: uncheckable.map((u) => ({ ecosystem, package: u.name, version: u.version, reason: u.reason })),
+      unchecked: [
+        ...uncheckable.map((u) => ({ ecosystem, package: u.name, version: u.version, reason: u.reason })),
+        ...lookupFailed.map((p) => ({ ecosystem, package: p.name, version: p.version, reason: 'lookup_failed' as const })),
+      ],
     });
     return saved ? 'completed' : 'stale';
   }

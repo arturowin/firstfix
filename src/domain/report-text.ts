@@ -45,7 +45,8 @@ function routes(pkg: string, v: ActionVersion & { candidate: CandidateStep }, hi
 }
 
 export interface SummaryInput {
-  counts: { totalDeps: number; checkedDeps: number };
+  /** failedLookups: dependencies the advisory source couldn't check (partial coverage). */
+  counts: { totalDeps: number; checkedDeps: number; failedLookups?: number };
   lockfilePath: string | null;
   actions: readonly Action[];
 }
@@ -58,7 +59,13 @@ export function summaryLine({ counts, lockfilePath, actions }: SummaryInput): st
     return `No dependencies could be checked: ${counts.totalDeps === 1 ? 'the only one comes' : `all ${String(counts.totalDeps)} come`} from sources advisory data doesn't cover (git, local files or other URLs).`;
   }
   const checked = `${String(counts.checkedDeps)} of ${plural(counts.totalDeps, 'dependency', 'dependencies')} checked`;
-  if (actions.length === 0) return `No known vulnerabilities in ${checked}.`;
+  // Partial coverage is said in the same line, so a partial result never reads as complete.
+  const failedLookups = counts.failedLookups ?? 0;
+  const partial =
+    failedLookups > 0
+      ? ` ${plural(failedLookups, 'dependency', 'dependencies')} could not be checked because the advisory lookup failed; rescan for full coverage.`
+      : '';
+  if (actions.length === 0) return `No known vulnerabilities in ${checked}.${partial}`;
 
   const malicious = actions.filter((a) => a.isMalicious).length;
   const vulnerable = actions.filter((a) => !a.isMalicious);
@@ -73,7 +80,7 @@ export function summaryLine({ counts, lockfilePath, actions }: SummaryInput): st
   }
   const first = actions[0];
   const start = first ? ` Start with: ${headline(first)}.` : '';
-  return `${parts.join(' and ')} in ${checked}.${start}`;
+  return `${parts.join(' and ')} in ${checked}.${partial}${start}`;
 }
 
 /** The short "what" of an action. */

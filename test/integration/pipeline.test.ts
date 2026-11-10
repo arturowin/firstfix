@@ -34,13 +34,14 @@ const advisory = (id: string): Advisory => ({
   references: [],
 });
 
-function vulns(result: AdvisoryLookup | Error, onLookup?: () => Promise<void>): VulnDatabase {
+/** A fake advisory source: `failedNames` are reported as not checked (partial coverage). */
+function vulns(result: AdvisoryLookup | Error, onLookup?: () => Promise<void>, failedNames: string[] = []): VulnDatabase {
   return {
     source: { name: 'Test advisories', url: 'https://advisories.test' },
-    lookup: async () => {
+    lookup: async (pkgs) => {
       await onLookup?.();
       if (result instanceof Error) throw result;
-      return result;
+      return { advisories: result, failed: pkgs.filter((p) => failedNames.includes(p.name)) };
     },
   };
 }
@@ -114,7 +115,7 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
         source: { name: 'Test advisories', url: 'https://advisories.test' },
         lookup: (pkgs) => {
           asked.push(...pkgs);
-          return Promise.resolve(new Map([['npm:lodash@4.17.20', [advisory('GHSA-1')]]]));
+          return Promise.resolve({ advisories: new Map([['npm:lodash@4.17.20', [advisory('GHSA-1')]]]), failed: [] });
         },
       },
     });
@@ -148,6 +149,38 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
     });
     expect(await pipeline.run(id, signal())).toBe('completed');
     expect((await scans.get(id))?.explanation).toMatchObject({ source: 'template', summary: expect.stringMatching(/^Start with safe-buffer/) as string });
+  });
+
+  it('some lookups fail → completed, partial coverage, failed ones listed as unchecked, said in the summary', async () => {
+    const id = await newScan();
+    const pipeline = new ScanPipeline({
+      scans,
+      source: source(twoPackages),
+      vulns: vulns(new Map([['npm:a@1.0.0', [advisory('GHSA-1')]]]), undefined, ['b']),
+    });
+    expect(await pipeline.run(id, signal())).toBe('completed');
+    const report = await scans.getReport(id);
+    expect(report?.scan).toMatchObject({
+      status: 'completed',
+      coverage: 'partial',
+      counts: { totalDeps: 3, checkedDeps: 1, unsupportedDeps: 1, failedLookups: 1 },
+      summaryLine: expect.stringMatching(
+        /in 1 of 3 dependencies checked\. 1 dependency could not be checked because the advisory lookup failed; rescan for full coverage\./,
+      ) as string,
+    });
+    expect(report?.unchecked).toEqual([
+      { ecosystem: 'npm', package: 'b', version: '2.0.0', reason: 'lookup_failed' },
+      { ecosystem: 'npm', package: 'g', version: '1.0.0', reason: 'unsupported_source' },
+    ]);
+  });
+
+  it('every lookup fails → a transient error (retried; failed only once retries run out)', async () => {
+    const id = await newScan();
+    const pipeline = new ScanPipeline({ scans, source: source(twoPackages), vulns: vulns(new Map(), undefined, ['a', 'b']) });
+    await expect(pipeline.run(id, signal())).rejects.toMatchObject({
+      code: 'advisory_lookup_failed',
+      message: 'Test advisories could not be reached: none of the 2 dependencies could be checked',
+    });
   });
 
   it('zero dependencies → completed with nothing to check', async () => {
