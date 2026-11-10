@@ -8,6 +8,7 @@ import {
   EXPLAINED_ACTIONS,
   explainInput,
   MAX_WHY_CHARS,
+  minimalExplanation,
   type ExplainInput,
   type Explanation,
 } from '../../src/domain/explanation.ts';
@@ -66,8 +67,8 @@ describe('checkExplanation', () => {
   });
 
   it.each([
-    ['invented version', (o: Explanation) => (o.summary = 'Upgrade lodash to 4.17.22 now.'), /version 4\.17\.22 is not in the scan data/],
-    ['invented advisory', (o: Explanation) => (o.summary = 'See CVE-2021-23337 for details.'), /advisory CVE-2021-23337 is not in the scan data/],
+    ['invented version', (o: Explanation) => (o.summary = 'Upgrade lodash to 4.17.22 now.'), /version 4\.17\.22 is not in this evidence/],
+    ['invented advisory', (o: Explanation) => (o.summary = 'See CVE-2021-23337 for details.'), /advisory CVE-2021-23337 is not in this evidence/],
     ['unknown action', (o: Explanation) => o.actions.push({ actionId: 'npm:left-pad', whyItMatters: 'x' }), /unknown action npm:left-pad/],
     ['missing action', (o: Explanation) => o.actions.pop(), /missing action/],
     ['duplicate action', (o: Explanation) => o.actions.push({ actionId: 'npm:lodash', whyItMatters: 'again' }), /duplicate action npm:lodash/],
@@ -81,6 +82,40 @@ describe('checkExplanation', () => {
     const r = checkExplanation(input, out);
     expect(r.ok).toBe(false);
     expect(r.ok ? [] : r.problems.join('\n')).toMatch(problem);
+  });
+
+  it('each action is checked against its own evidence; the summary may use any action’s', () => {
+    // Review reproduction: an explanation for one package quoting another package's advisory and versions.
+    const out = valid();
+    out.actions = out.actions.map((a) =>
+      a.actionId === 'npm:request' ? { ...a, whyItMatters: 'GHSA-29mw-wpgm-hmr9 affects 4.17.20; move to 4.17.21.' } : a,
+    );
+    const r = checkExplanation(input, out);
+    expect(r.ok ? [] : r.problems).toEqual([
+      'action npm:request: version 4.17.20 is not in this evidence',
+      'action npm:request: version 4.17.21 is not in this evidence',
+      'action npm:request: advisory GHSA-29mw-wpgm-hmr9 is not in this evidence',
+    ]);
+    const summaryOnly = valid();
+    summaryOnly.summary = 'GHSA-29mw-wpgm-hmr9 on lodash 4.17.20 and GHSA-p8p7-x288-28g6 on request 2.88.2.';
+    expect(checkExplanation(input, summaryOnly)).toEqual({ ok: true });
+  });
+
+  it('package names are identifiers, not claims or versions ("safe-buffer", "fixed-width", "lib-1.2")', () => {
+    const odd = explainInput({
+      ...facts,
+      actions: buildFixPlan(
+        ['safe-buffer', 'fixed-width', 'lib-1.2'].map((p, i) => f({ package: p, advisoryId: `GHSA-000${String(i)}-0000-0000` })),
+        () => npmVersionScheme,
+      ),
+    });
+    const out: Explanation = {
+      summary: 'Start with safe-buffer, then fixed-width and lib-1.2.',
+      actions: odd.actions.map((a) => ({ actionId: a.actionId, whyItMatters: `${a.package} has no fixed version published.` })),
+    };
+    expect(checkExplanation(odd, out)).toEqual({ ok: true });
+    // The same words as prose are still claims.
+    expect(checkExplanation(odd, { ...out, summary: 'After this, safe-buffer is safe.' }).ok).toBe(false);
   });
 
   it('"no fixed version published" is the product’s own wording, not a fix claim', () => {
@@ -119,6 +154,54 @@ describe('TemplateExplainer', () => {
       const clean = explainInput({ ...facts, checkedDeps, actions: [] });
       expect(checkExplanation(clean, await template.explain(clean))).toEqual({ ok: true });
     }
+  });
+});
+
+describe('template robustness (review reproductions)', () => {
+  const template = new TemplateExplainer();
+  const signal = () => new AbortController().signal;
+
+  it('a package named safe-buffer, no AI configured → completes with template text that passes the check', async () => {
+    const plan = buildFixPlan([f({ package: 'safe-buffer', advisoryId: 'GHSA-0000-0000-0001', severity: 'high' })], () => npmVersionScheme);
+    const r = await explainPlan({ ai: null, template, timeoutMs: 1000 }, { ...facts, actions: plan }, signal());
+    expect(r.source).toBe('template');
+    expect(r.fallbackReason).toBeUndefined();
+    expect(r.summary).toMatch(/^Start with safe-buffer/);
+  });
+
+  it('very long parent and package names → text stays within limits and passes', async () => {
+    const long = (c: string) => `@${c.repeat(40)}/${c.repeat(170)}`;
+    const plan = buildFixPlan(
+      [f({ package: long('x'), isDirect: false, directParents: [long('a'), long('b'), long('c')], advisoryId: 'GHSA-0000-0000-0002', severity: 'high', candidateVersion: '9.0.0', fixStatus: 'candidate', affectedRanges: [range('0', '9.0.0')] })],
+      () => npmVersionScheme,
+    );
+    const all = explainInput({ ...facts, actions: plan }, Infinity);
+    const out = await template.explain(all);
+    expect(out.actions[0]?.whyItMatters.length).toBeLessThanOrEqual(MAX_WHY_CHARS);
+    expect(checkExplanation(all, out)).toEqual({ ok: true });
+    const r = await explainPlan({ ai: null, template, timeoutMs: 1000 }, { ...facts, actions: plan }, signal());
+    expect(r.fallbackReason).toBeUndefined();
+  });
+
+  it('a template that throws or fails the check → minimal text, reason kept, the scan is not failed', async () => {
+    const throwing: Explainer = { explain: () => Promise.reject(new Error('boom')) };
+    const failing: Explainer = { explain: () => Promise.resolve({ summary: 'Everything is secure.', actions: [] }) };
+    for (const [t, reason] of [[throwing, /template error: Error: boom/], [failing, /template failed the facts check/]] as const) {
+      const r = await explainPlan({ ai: null, template: t, timeoutMs: 1000 }, facts, signal());
+      expect(r.source).toBe('template');
+      expect(r.fallbackReason).toMatch(reason);
+      expect(Object.keys(r.actions)).toHaveLength(demoPlan.length);
+    }
+    const all = explainInput(facts, Infinity);
+    expect(checkExplanation(all, minimalExplanation(all))).toEqual({ ok: true });
+  });
+
+  it('describes lockfile scope without claiming deployment or execution', async () => {
+    const all = explainInput(facts, Infinity);
+    const text = (await template.explain(all)).actions.map((a) => a.whyItMatters).join(' ');
+    expect(text).toMatch(/Marked as a development dependency in the lockfile; .*Production exposure wasn't assessed\./);
+    expect(text).toMatch(/Marked as a runtime dependency in the lockfile; whether the application deploys or executes it wasn't assessed\./);
+    expect(text).not.toMatch(/ships with|rather than in production|not shipped/i);
   });
 });
 

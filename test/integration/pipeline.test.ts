@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgresScanRepository } from '../../src/adapters/postgres/scan-repository.ts';
 import { ScanPipeline } from '../../src/application/scan-pipeline.ts';
+import { TemplateExplainer } from '../../src/adapters/template-explainer.ts';
 import type { Advisory } from '../../src/domain/advisory.ts';
 import { PermanentError, TransientError } from '../../src/ports/errors.ts';
 import type { RepoSource } from '../../src/ports/repo-source.ts';
@@ -131,6 +132,22 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
       counts: { totalDeps: 1, checkedDeps: 0, unsupportedDeps: 1 },
       summaryLine: expect.stringMatching(/^No dependencies could be checked/) as string,
     });
+  });
+
+  it('explanation trouble never fails a scan: safe-buffer with no AI configured completes with template prose', async () => {
+    const id = await newScan();
+    const lock = lockfile({
+      '': { dependencies: { 'safe-buffer': '5.0.0' } },
+      'node_modules/safe-buffer': { version: '5.0.0', resolved: 'https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.0.0.tgz' },
+    });
+    const pipeline = new ScanPipeline({
+      scans,
+      source: source(lock),
+      vulns: vulns(new Map([['npm:safe-buffer@5.0.0', [advisory('GHSA-1')]]])),
+      explain: { ai: null, template: new TemplateExplainer(), timeoutMs: 1000 },
+    });
+    expect(await pipeline.run(id, signal())).toBe('completed');
+    expect((await scans.get(id))?.explanation).toMatchObject({ source: 'template', summary: expect.stringMatching(/^Start with safe-buffer/) as string });
   });
 
   it('zero dependencies → completed with nothing to check', async () => {

@@ -3,7 +3,13 @@
  * the AI explainer, when configured, explains the summary and the top actions. AI output is used only if it
  * arrives in time and passes the facts check; otherwise the template's text stands. Never fails a scan.
  */
-import { checkExplanation, explainInput, type StoredExplanation } from '../domain/explanation.ts';
+import {
+  checkExplanation,
+  explainInput,
+  minimalExplanation,
+  type Explanation,
+  type StoredExplanation,
+} from '../domain/explanation.ts';
 import type { Action } from '../domain/fix-plan.ts';
 import type { Explainer } from '../ports/explainer.ts';
 
@@ -21,14 +27,28 @@ export async function explainPlan(
   signal: AbortSignal,
 ): Promise<StoredExplanation> {
   const all = explainInput(facts, Infinity);
-  const template = await deps.template.explain(all, signal);
-  const templateCheck = checkExplanation(all, template);
-  if (!templateCheck.ok) throw new Error(`template explanation failed its own check: ${templateCheck.problems.join('; ')}`);
+  // The template should always pass; if it doesn't (e.g. a package name nobody anticipated), the minimal text
+  // stands in and the reason is kept. Explanation problems never fail a scan.
+  let template: Explanation;
+  let templateProblem: string | null = null;
+  try {
+    template = await deps.template.explain(all, signal);
+    const check = checkExplanation(all, template);
+    if (!check.ok) {
+      templateProblem = `template failed the facts check: ${check.problems.slice(0, 5).join('; ')}`;
+      template = minimalExplanation(all);
+    }
+  } catch (err) {
+    if (signal.aborted) throw signal.reason;
+    templateProblem = `template error: ${describe(err)}`;
+    template = minimalExplanation(all);
+  }
 
   const stored: StoredExplanation = {
     source: 'template',
     summary: template.summary,
     actions: Object.fromEntries(template.actions.map((a) => [a.actionId, { text: a.whyItMatters, source: 'template' as const }])),
+    ...(templateProblem ? { fallbackReason: templateProblem } : {}),
   };
   // Nothing to explain beyond the clean-result wording: no AI call.
   if (!deps.ai || all.actions.length === 0) return stored;
@@ -51,7 +71,7 @@ export async function explainPlan(
     if (signal.aborted) throw signal.reason;
     reason = deadline.aborted ? `no answer within ${String(deps.timeoutMs)} ms` : `error: ${describe(err)}`;
   }
-  stored.fallbackReason = reason;
+  stored.fallbackReason = templateProblem ? `${reason}; ${templateProblem}` : reason;
   return stored;
 }
 

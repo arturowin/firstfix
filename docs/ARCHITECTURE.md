@@ -322,9 +322,14 @@ Fix information shapes the action, not the rank.
 - AI writes only the summary paragraph and per-action "why it matters" (top 10 actions; the rest get template
   text). Each piece is labelled AI or Template in the UI; facts never come from it.
 - Every explainer's output, the template's included, passes `checkExplanation` (`src/domain/explanation.ts`):
-  exactly the expected action IDs (`<ecosystem>:<package>`), no version or advisory ID outside the scan data,
-  length limits, no "secure"/"safe"/"guarantee"/"fixed" ("no fixed version published" allowed). Prose truth
-  can't be validated (stated in README).
+  exactly the expected action IDs (`<ecosystem>:<package>`); each action's text may use only **that action's**
+  versions and advisory IDs (the summary may use any action's); length limits; no "secure"/"safe"/"guarantee"/
+  "fixed" ("no fixed version published" allowed). Package names are masked before checking, so `safe-buffer` is
+  an identifier, not a claim. Prose truth can't be validated (stated in README).
+- The template bounds its own length (package names are unbounded) and describes lockfile scope only: "Marked as
+  a runtime/development dependency in the lockfile; … wasn't assessed". If the template still fails the check
+  or throws, fixed minimal sentences that name nothing stand in, with the reason stored. Explanation problems
+  never fail a scan (review finding, M3).
 - `application/explain.ts`: template for everything, AI for the summary + top actions only if it answers within
   `LLM_TIMEOUT_MS` (enforced even if the call ignores its abort signal) and passes the check. A stopped job
   propagates instead of falling back. Stored on `scans.explanation` (jsonb, with the fallback reason, not shown)

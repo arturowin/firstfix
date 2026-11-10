@@ -173,3 +173,20 @@ One entry per milestone (or per notable session). Keep it factual.
   - The eval's soft signal caught that the template summary didn't name the malicious package; it does now.
 - **Verified by:** 267 tests green, typecheck, lint; `npm run eval` (template) 4/4; a live no-key demo scan
   gave a complete report with template prose. Not yet verified: a live run with a real Anthropic key.
+
+### 2026-11-10 · M3 review fixes
+- **Review found (all confirmed):**
+  - P1: the template could fail the scan. A package named `safe-buffer` tripped the "safe" claim check, and
+    long parent names pushed the text past 300 characters; both threw with no AI configured.
+  - P2: each action's text was checked against every action's versions and IDs pooled together.
+  - P2: the template said dev dependencies run "rather than in production" and runtime ones "ship with the
+    application", which the scan can't know.
+- **Agent did:**
+  - The check masks package names (real, alias, parent) before the claim and version checks, and checks each
+    action against its own evidence.
+  - The template bounds its length and uses lockfile-scope wording.
+  - If the template still fails or throws, minimal fixed sentences stand in and the reason is stored; the
+    scan completes.
+  - The AI prompt gained the same two rules (scope is a classification; only the action's own evidence).
+- **Verified by:** 274 tests green (including both reproductions at the unit and pipeline level), lint,
+  typecheck; eval 4/4 with the template. A live AI run and a browser walkthrough are still pending.
