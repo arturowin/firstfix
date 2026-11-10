@@ -11,12 +11,18 @@ export type SubmitResult =
   /** Same key, same request: the scan created by the first request. */
   | { kind: 'existing'; scanId: string }
   /** Same key, different request. */
-  | { kind: 'conflict' };
+  | { kind: 'conflict' }
+  /** Too many scans are queued or running; nothing was created. */
+  | { kind: 'busy'; outstanding: number };
 
 /**
  * Creates the scan row and its job atomically (one transaction): a scan never exists without a job,
  * and a job never exists without its scan. The job id is the scan id.
  */
 export interface ScanSubmission {
+  /**
+   * `maxOutstanding`: refuse (kind 'busy') when this many scans are already queued, running or retrying.
+   * Replays of an existing Idempotency-Key are answered regardless: they create nothing.
+   */
   submit(input: { scanId: string; repo: RepoRef; idempotency: IdempotencyInput | null }): Promise<SubmitResult>;
 }

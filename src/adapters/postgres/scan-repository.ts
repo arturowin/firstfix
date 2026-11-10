@@ -318,6 +318,22 @@ export class PostgresScanRepository implements ScanRepository {
     return rows.map((r) => ({ id: r.id, updatedAt: r.updated_at }));
   }
 
+  async deleteExpired(limits: { scanDays: number; keyHours: number; batchSize: number }): Promise<{ scans: number; keys: number }> {
+    const keys = await this.pool.query(
+      `DELETE FROM idempotency_keys WHERE key IN (
+         SELECT key FROM idempotency_keys WHERE created_at < now() - make_interval(hours => $1) LIMIT $2)`,
+      [limits.keyHours, limits.batchSize],
+    );
+    const scans = await this.pool.query(
+      `DELETE FROM scans WHERE id IN (
+         SELECT id FROM scans
+          WHERE status IN ${TERMINAL} AND completed_at < now() - make_interval(days => $1)
+          LIMIT $2)`,
+      [limits.scanDays, limits.batchSize],
+    );
+    return { scans: scans.rowCount ?? 0, keys: keys.rowCount ?? 0 };
+  }
+
   async markRetrying(claim: ClaimedScan, reason: { code: string; message: string }): Promise<boolean> {
     const res = await this.pool.query(
       `UPDATE scans SET status = 'retrying', error_code = $3, error_message = $4

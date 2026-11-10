@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgresScanRepository } from '../../src/adapters/postgres/scan-repository.ts';
 import { PostgresScanSubmission } from '../../src/adapters/postgres/scan-submission.ts';
 import { buildApp } from '../../src/api/app.ts';
+import { fixedWindowLimiter } from '../../src/api/rate-limit.ts';
 import { ScanService } from '../../src/application/scan-service.ts';
 import { createTestEnv, type TestEnv } from '../support/env.ts';
 
@@ -78,6 +79,40 @@ describe('HTTP API', () => {
       const res = await post({ repoUrl: 'https://github.com/a/b' }, { 'idempotency-key': 'x'.repeat(201) });
       expect(res.statusCode).toBe(400);
       expect(res.json<{ error: { code: string } }>().error.code).toBe('invalid_idempotency_key');
+    });
+  });
+
+  describe('admission control', () => {
+    it('per-client limit → 429 with Retry-After; another client is unaffected', async () => {
+      const limited = buildApp({
+        scans: new ScanService(new PostgresScanSubmission(env.pool, env.boss), new PostgresScanRepository(env.pool)),
+        checkReady: () => Promise.resolve(),
+        webDir,
+        submitLimiter: fixedWindowLimiter(2),
+      });
+      const send = (ip: string) =>
+        limited.inject({ method: 'POST', url: '/scans', payload: { repoUrl: 'https://github.com/a/limited' }, remoteAddress: ip });
+      expect((await send('10.0.0.1')).statusCode).toBe(202);
+      expect((await send('10.0.0.1')).statusCode).toBe(202);
+      const third = await send('10.0.0.1');
+      expect(third.statusCode).toBe(429);
+      expect(Number(third.headers['retry-after'])).toBeGreaterThan(0);
+      expect(third.json<{ error: { code: string } }>().error.code).toBe('rate_limited');
+      expect((await send('10.0.0.2')).statusCode).toBe(202);
+      await limited.close();
+    });
+
+    it('outstanding-scan cap → 503 busy with Retry-After', async () => {
+      const full = buildApp({
+        scans: new ScanService(new PostgresScanSubmission(env.pool, env.boss, { maxOutstanding: 1 }), new PostgresScanRepository(env.pool)),
+        checkReady: () => Promise.resolve(),
+        webDir,
+      });
+      const res = await full.inject({ method: 'POST', url: '/scans', payload: { repoUrl: 'https://github.com/a/full' } });
+      expect(res.statusCode).toBe(503);
+      expect(res.headers['retry-after']).toBe('30');
+      expect(res.json<{ error: { code: string } }>().error.code).toBe('busy');
+      await full.close();
     });
   });
 

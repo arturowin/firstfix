@@ -414,8 +414,13 @@ Never says "secure". Partial clean is never shown as clean overall.
 - `GET /health/live`, `GET /health/ready`
 
 ## Known limits (state in README)
-- No rate limiting on `POST /scans`; worker concurrency set via pg-boss options only.
-- Idempotency keys are kept indefinitely (no retention job).
+- Admission control (review finding): `POST /scans` has a per-client limit (fixed one-minute window, in
+  memory per API process, `SUBMIT_RATE_PER_MINUTE`, 429 + Retry-After) and an exact cap on outstanding scans
+  (`MAX_OUTSTANDING_SCANS`, checked in the submission transaction under an advisory lock, 503 + Retry-After;
+  key replays still answer). Several API instances each apply their own per-client limit.
+- Retention: the worker deletes finished scans after `SCAN_RETENTION_DAYS` (findings, unchecked deps and keys
+  cascade) and idempotency keys after `IDEMPOTENCY_KEY_TTL_HOURS`, hourly, in batches. Unfinished scans are
+  never deleted; a deleted scan's link answers 404. Worker concurrency is set per process.
 - Public github.com repos only; root `package-lock.json` only (npm is the only implemented ecosystem; the
   seams for others are described under "Ecosystems").
 - One lockfile per scan; manifests without a lockfile (ranges, no exact versions) are not supported.

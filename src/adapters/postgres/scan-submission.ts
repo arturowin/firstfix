@@ -14,13 +14,19 @@ function resultForExistingKey(row: KeyRow, idem: IdempotencyInput): SubmitResult
   return row.request_hash === idem.requestHash ? { kind: 'existing', scanId: row.scan_id } : { kind: 'conflict' };
 }
 
+/** Arbitrary constant key for the admission-control advisory lock. */
+const ADMISSION_LOCK = 7_340_211;
+
 export class PostgresScanSubmission implements ScanSubmission {
   private readonly pool: pg.Pool;
   private readonly boss: PgBoss;
+  private readonly maxOutstanding: number | null;
 
-  constructor(pool: pg.Pool, boss: PgBoss) {
+  /** `maxOutstanding` null: no cap (tests that don't care). The API always sets one. */
+  constructor(pool: pg.Pool, boss: PgBoss, options: { maxOutstanding?: number | null } = {}) {
     this.pool = pool;
     this.boss = boss;
+    this.maxOutstanding = options.maxOutstanding ?? null;
   }
 
   async submit(input: { scanId: string; repo: RepoRef; idempotency: IdempotencyInput | null }): Promise<SubmitResult> {
@@ -34,6 +40,17 @@ export class PostgresScanSubmission implements ScanSubmission {
         );
         const row = prior.rows[0];
         if (row) throw new Rollback(resultForExistingKey(row, idem));
+      }
+
+      // Admission control: an exact cap on outstanding scans. The transaction-scoped advisory lock serializes
+      // this check-then-insert across API processes; the count uses the partial index on non-terminal rows.
+      if (this.maxOutstanding !== null) {
+        await client.query('SELECT pg_advisory_xact_lock($1)', [ADMISSION_LOCK]);
+        const { rows } = await client.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM scans WHERE status NOT IN ('completed', 'unsupported', 'failed')`,
+        );
+        const outstanding = rows[0]?.n ?? 0;
+        if (outstanding >= this.maxOutstanding) throw new Rollback({ kind: 'busy', outstanding });
       }
 
       await client.query(

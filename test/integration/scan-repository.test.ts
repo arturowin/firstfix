@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgresScanRepository } from '../../src/adapters/postgres/scan-repository.ts';
+import { purgeExpired } from '../../src/application/retention.ts';
 import type { Completion } from '../../src/ports/scan-repository.ts';
 import { createTestEnv, type TestEnv } from '../support/env.ts';
 
@@ -146,6 +147,34 @@ describe('PostgresScanRepository: attempt ownership', () => {
       [id],
     );
     expect((await repo.getReport(id))?.findings[0]?.affectedRanges).toBeNull();
+  });
+
+  it('retention: old finished scans go with their findings and keys; recent and unfinished ones stay; old keys expire', async () => {
+    const old = await newScan();
+    const recent = await newScan();
+    const stuckOld = await newScan(); // not finished: never deleted, however old
+    for (const id of [old, recent]) {
+      const claim = await repo.claim(id);
+      if (!claim) throw new Error('claim failed');
+      await repo.complete(claim, completion);
+    }
+    await env.pool.query(`UPDATE scans SET completed_at = now() - interval '40 days' WHERE id = $1`, [old]);
+    await env.pool.query(`UPDATE scans SET created_at = now() - interval '400 days' WHERE id = $1`, [stuckOld]);
+    await env.pool.query(
+      `INSERT INTO idempotency_keys (key, request_hash, scan_id, created_at) VALUES
+         ('ret-old-key', 'h', $1, now() - interval '30 hours'), ('ret-new-key', 'h', $1, now())`,
+      [recent],
+    );
+
+    const r = await purgeExpired(repo, { scanDays: 30, keyHours: 24 });
+    expect(r.scans).toBeGreaterThanOrEqual(1);
+    expect(await repo.get(old)).toBeNull();
+    const orphans = await env.pool.query('SELECT 1 FROM findings WHERE scan_id = $1 UNION ALL SELECT 1 FROM unchecked_deps WHERE scan_id = $1', [old]);
+    expect(orphans.rows).toHaveLength(0);
+    expect(await repo.get(recent)).not.toBeNull();
+    expect(await repo.get(stuckOld)).not.toBeNull();
+    const keys = await env.pool.query<{ key: string }>(`SELECT key FROM idempotency_keys WHERE key LIKE 'ret-%' ORDER BY key`);
+    expect(keys.rows.map((k) => k.key)).toEqual(['ret-new-key']);
   });
 
   it('a failed completion transaction leaves no partial findings', async () => {

@@ -6,7 +6,8 @@ import { createPool } from '../adapters/postgres/pool.ts';
 import { PostgresScanRepository } from '../adapters/postgres/scan-repository.ts';
 import { ensureQueues, SCAN_QUEUE } from '../adapters/pgboss/queue.ts';
 import { ScanPipeline } from '../application/scan-pipeline.ts';
-import { startScanWorker, startSweeper } from './scan-worker.ts';
+import { startPeriodic, startScanWorker, startSweeper } from './scan-worker.ts';
+import { purgeExpired } from '../application/retention.ts';
 import { Sweeper } from '../application/lost-scans.ts';
 import { PgBossJobQueue } from '../adapters/pgboss/job-queue.ts';
 import { TemplateExplainer } from '../adapters/template-explainer.ts';
@@ -51,6 +52,24 @@ await startScanWorker(boss, { pipeline, scans, concurrency, log });
 
 // Safety net for scans whose job is gone. Staleness = longer than one attempt can take (expireInSeconds 300)
 // plus retry backoff and a margin; the job's state in pg-boss decides, not the clock.
+// Retention: finished scans after SCAN_RETENTION_DAYS (cascading), idempotency keys after IDEMPOTENCY_KEY_TTL_HOURS.
+const positive = (name: string, fallback: number) => {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+const stopRetention = startPeriodic(
+  'retention',
+  async () => {
+    const r = await purgeExpired(scans, {
+      scanDays: positive('SCAN_RETENTION_DAYS', 30),
+      keyHours: positive('IDEMPOTENCY_KEY_TTL_HOURS', 24),
+    });
+    if (r.scans + r.keys > 0) log({ msg: 'retention deleted expired rows', ...r });
+  },
+  positive('RETENTION_INTERVAL_MS', 3_600_000),
+  log,
+);
+
 const stopSweeper = startSweeper(
   new Sweeper({ scans, jobs: new PgBossJobQueue(boss), staleAfterSeconds: Number(process.env['SWEEP_STALE_AFTER_SECONDS'] ?? 600) }),
   Number(process.env['SWEEP_INTERVAL_MS'] ?? 60_000),
@@ -64,6 +83,7 @@ async function shutdown(signal: string): Promise<void> {
   stopping = true;
   console.log(`worker: ${signal}, finishing in-flight scans`);
   stopSweeper();
+  stopRetention();
   // Graceful: in-flight jobs get up to 30 s; anything cut off is retried via heartbeat/expiry.
   await boss.stop({ graceful: true, timeout: 30_000 });
   await pool.end();

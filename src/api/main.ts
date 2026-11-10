@@ -7,6 +7,7 @@ import { PostgresScanSubmission } from '../adapters/postgres/scan-submission.ts'
 import { ensureQueues } from '../adapters/pgboss/queue.ts';
 import { ScanService } from '../application/scan-service.ts';
 import { buildApp } from './app.ts';
+import { fixedWindowLimiter } from './rate-limit.ts';
 
 const databaseUrl = process.env['DATABASE_URL'];
 if (!databaseUrl) {
@@ -25,8 +26,18 @@ boss.on('error', (err: unknown) => {
 await boss.start();
 await ensureQueues(boss);
 
+const intEnv = (name: string, fallback: number) => {
+  const n = Number(process.env[name]);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+};
+
 const app = buildApp({
-  scans: new ScanService(new PostgresScanSubmission(pool, boss), new PostgresScanRepository(pool)),
+  scans: new ScanService(
+    new PostgresScanSubmission(pool, boss, { maxOutstanding: intEnv('MAX_OUTSTANDING_SCANS', 200) }),
+    new PostgresScanRepository(pool),
+  ),
+  submitLimiter: fixedWindowLimiter(intEnv('SUBMIT_RATE_PER_MINUTE', 10)),
+  trustProxy: process.env['TRUST_PROXY'] === 'true',
   checkReady: async () => {
     await pool.query('SELECT 1');
   },

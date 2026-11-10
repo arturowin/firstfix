@@ -24,6 +24,27 @@ describe('scan submission (Postgres + pg-boss)', () => {
     return Number(rows[0]?.n);
   }
 
+  it('admission control: at the outstanding-scan cap nothing is created; key replays still answer; a finished scan frees a slot', async () => {
+    const { rows } = await env.pool.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM scans WHERE status NOT IN ('completed', 'unsupported', 'failed')`,
+    );
+    const open = rows[0]?.n ?? 0;
+    const capped = new ScanService(
+      new PostgresScanSubmission(env.pool, env.boss, { maxOutstanding: open + 1 }),
+      new PostgresScanRepository(env.pool),
+    );
+    const first = await capped.submit('https://github.com/a/cap-1', 'k-cap-1');
+    expect(first.kind).toBe('created');
+    const before = await scanCount();
+    expect(await capped.submit('https://github.com/a/cap-2', 'k-cap-2')).toEqual({ kind: 'busy', outstanding: open + 1 });
+    expect(await scanCount()).toBe(before); // nothing created, no job either (same transaction)
+    expect(await capped.submit('https://github.com/a/cap-1', 'k-cap-1')).toEqual(first.kind === 'created' ? { kind: 'existing', scanId: first.scanId } : first);
+
+    if (first.kind !== 'created') throw new Error('unreachable');
+    await env.pool.query(`UPDATE scans SET status = 'failed', error_code = 'x', error_message = 'x' WHERE id = $1`, [first.scanId]);
+    expect((await capped.submit('https://github.com/a/cap-2', 'k-cap-2')).kind).toBe('created');
+  });
+
   it('creates the scan row and a job whose id is the scan id, in one go', async () => {
     const r = await service.submit('https://github.com/Owner/Repo.git', null);
     expect(r.kind).toBe('created');

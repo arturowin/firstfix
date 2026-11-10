@@ -66,6 +66,11 @@ your shell or a `.env` file (see `.env.example`):
 | `LLM_MODEL` | provider default (`claude-opus-5-5`) | model for explanations |
 | `LLM_TIMEOUT_MS` | `20000` | after this, the template's text is used |
 | `WORKER_CONCURRENCY` | `2` | scans per worker process |
+| `SUBMIT_RATE_PER_MINUTE` | `10` | scans one client (IP) may request per minute; then `429` |
+| `MAX_OUTSTANDING_SCANS` | `200` | scans queued or running at once; then `503` "busy" |
+| `TRUST_PROXY` | `false` | take the client IP from `X-Forwarded-For` (only behind your own proxy) |
+| `SCAN_RETENTION_DAYS` | `30` | finished scans (and their findings) are deleted after this |
+| `IDEMPOTENCY_KEY_TTL_HOURS` | `24` | idempotency keys expire after this |
 
 ### Without Docker
 
@@ -205,9 +210,10 @@ Every lifecycle outcome is reachable and tested; the outcome → test map is in
 - **AI text:** it's checked for invented identifiers and versions, overlong text and banned claims, but the
   truth of its prose can't be validated. That's why it's labelled and facts never come from it.
 - **Operations:**
-  - No rate limiting on `POST /scans`.
-  - Worker concurrency is set per process (`WORKER_CONCURRENCY`); there's no global limit.
-  - Idempotency keys are kept forever (no retention job).
+  - The per-client limit on `POST /scans` is kept in memory per API process; with several API instances
+    each applies its own. Behind a proxy, set `TRUST_PROXY` or every client shares one address.
+  - Worker concurrency is set per process (`WORKER_CONCURRENCY`); the outstanding-scan cap bounds the queue.
+  - Finished scans are deleted after 30 days by default, so old shareable links stop working.
   - GitHub without a token allows 60 requests/hour per IP; each scan uses 2 API calls plus raw file reads.
 
 ## Next steps
@@ -217,7 +223,8 @@ Every lifecycle outcome is reachable and tested; the outcome → test map is in
    `poetry.lock` / `uv.lock`.
 3. CVSS-based severity when the label is missing; a second advisory source behind the same contract.
 4. Rescan diffs ("2 fixed, 1 new since last scan"), so the loop of upgrade → rescan → confirm is visible.
-5. A rate limit on `POST /scans` and a retention job for idempotency keys and old scans.
+5. Shared rate limiting across API instances (in Postgres or at the proxy), and per-repository dedup of
+   identical in-flight scans.
 6. Reachability hints for the top action (is the vulnerable function imported?), labelled as heuristics.
 
 ## How I used coding agents

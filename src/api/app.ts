@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Report } from '../application/report.ts';
 import type { ScanService } from '../application/scan-service.ts';
 import type { ScanView } from '../ports/scan-repository.ts';
+import type { RateLimiter } from './rate-limit.ts';
 
 export interface AppDeps {
   scans: ScanService;
@@ -13,6 +14,10 @@ export interface AppDeps {
   /** Directory with index.html and the bundled app.js. */
   webDir: string;
   logger?: boolean;
+  /** Per-client limit on POST /scans; omitted = unlimited (tests that don't care). */
+  submitLimiter?: RateLimiter;
+  /** Trust X-Forwarded-For for the client IP (only behind a proxy you control). */
+  trustProxy?: boolean;
 }
 
 const SubmitBody = z.object({ repoUrl: z.string().max(2048) }).strict();
@@ -65,7 +70,7 @@ function wantsHtml(req: FastifyRequest): boolean {
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
-  const app = Fastify({ logger: deps.logger ?? false, bodyLimit: 16 * 1024 });
+  const app = Fastify({ logger: deps.logger ?? false, bodyLimit: 16 * 1024, trustProxy: deps.trustProxy ?? false });
 
   const sendIndex = async (reply: FastifyReply) => {
     const html = await readFile(path.join(deps.webDir, 'index.html'), 'utf8');
@@ -84,6 +89,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   app.post('/scans', async (req, reply) => {
+    const wait = deps.submitLimiter?.take(req.ip) ?? 0;
+    if (wait > 0) {
+      reply.header('retry-after', String(wait));
+      return error(reply, 429, 'rate_limited', `Too many scans requested from this address. Try again in ${String(wait)} s.`);
+    }
     const body = SubmitBody.safeParse(req.body);
     if (!body.success) {
       return error(reply, 400, 'invalid_body', 'Send JSON like {"repoUrl": "https://github.com/owner/repo"}');
@@ -103,6 +113,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return error(reply, 400, 'invalid_repo_url', result.error);
       case 'conflict':
         return error(reply, 409, 'idempotency_conflict', 'This Idempotency-Key was already used for a different repository');
+      case 'busy':
+        reply.header('retry-after', '30');
+        return error(reply, 503, 'busy', 'Too many scans are waiting right now. Please try again in a minute.');
       case 'created':
         return reply.code(202).header('location', `/scans/${result.scanId}`).send({ scanId: result.scanId });
       case 'existing':

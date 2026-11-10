@@ -141,6 +141,12 @@ export interface ScanRepository {
    * pagination, so a sweep can move past stale scans that are healthy, e.g. a queued backlog).
    */
   findStale(olderThanSeconds: number, limit: number, after?: StaleCursor | null): Promise<StaleScan[]>;
+  /**
+   * Retention: deletes up to `batchSize` finished scans completed more than `scanDays` ago (their findings,
+   * unchecked deps and keys cascade) and up to `batchSize` idempotency keys older than `keyHours`.
+   * Scans that aren't finished are never deleted. Returns how many rows of each went.
+   */
+  deleteExpired(limits: { scanDays: number; keyHours: number; batchSize: number }): Promise<{ scans: number; keys: number }>;
   /** Terminal outcome without findings. */
   finish(
     claim: ClaimedScan,

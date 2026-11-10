@@ -31,6 +31,10 @@ services:
     environment:
       DATABASE_URL: postgres://scan:scan@postgres:5432/scan
       PORT: "3000"
+      # Admission control: per-client submits per minute, and how many scans may be queued/running at once.
+      SUBMIT_RATE_PER_MINUTE: ${SUBMIT_RATE_PER_MINUTE:-10}
+      MAX_OUTSTANDING_SCANS: ${MAX_OUTSTANDING_SCANS:-200}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
     ports:
       - "3000:3000"
     depends_on:
@@ -55,6 +59,9 @@ services:
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-20000}
       WORKER_CONCURRENCY: "2"
+      # Retention: finished scans (with findings and keys) and idempotency keys.
+      SCAN_RETENTION_DAYS: ${SCAN_RETENTION_DAYS:-30}
+      IDEMPOTENCY_KEY_TTL_HOURS: ${IDEMPOTENCY_KEY_TTL_HOURS:-24}
     depends_on:
       migrate:
         condition: service_completed_successfully

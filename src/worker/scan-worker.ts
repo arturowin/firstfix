@@ -57,19 +57,15 @@ export async function startScanWorker(boss: PgBoss, deps: ScanWorkerDeps): Promi
   });
 }
 
-/** Runs the sweeper every `intervalMs`; returns a stop function. One sweep at a time; errors are logged. */
-export function startSweeper(sweeper: Sweeper, intervalMs: number, log: Log = () => undefined): () => void {
+/** Runs `task` every `intervalMs`, one run at a time; errors are logged. Returns a stop function. */
+export function startPeriodic(name: string, task: () => Promise<void>, intervalMs: number, log: Log = () => undefined): () => void {
   let running = false;
   const timer = setInterval(() => {
     if (running) return;
     running = true;
-    sweeper
-      .sweepOnce()
-      .then((r) => {
-        if (r.failed.length > 0) log({ msg: 'sweeper failed lost scans', scanIds: r.failed, checked: r.checked });
-      })
+    task()
       .catch((err: unknown) => {
-        log({ msg: 'sweeper error', error: err instanceof Error ? err.message : String(err) });
+        log({ msg: `${name} error`, error: err instanceof Error ? err.message : String(err) });
       })
       .finally(() => {
         running = false;
@@ -79,4 +75,17 @@ export function startSweeper(sweeper: Sweeper, intervalMs: number, log: Log = ()
   return () => {
     clearInterval(timer);
   };
+}
+
+/** Runs the sweeper every `intervalMs`; returns a stop function. */
+export function startSweeper(sweeper: Sweeper, intervalMs: number, log: Log = () => undefined): () => void {
+  return startPeriodic(
+    'sweeper',
+    async () => {
+      const r = await sweeper.sweepOnce();
+      if (r.failed.length > 0) log({ msg: 'sweeper failed lost scans', scanIds: r.failed, checked: r.checked });
+    },
+    intervalMs,
+    log,
+  );
 }
