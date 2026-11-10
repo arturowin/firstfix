@@ -35,7 +35,7 @@ function summary(input: ExplainInput): string {
   ];
   const upgrades = input.actions.filter((a) => a.kind === 'upgrade').length;
   if (upgrades > 0) parts.push(`${plural(upgrades, 'package')} ${upgrades === 1 ? 'has' : 'have'} a candidate version to try; each needs tests and a rescan to confirm.`);
-  if (noFix > 0) parts.push(`${plural(noFix, 'package')} ${noFix === 1 ? 'has' : 'have'} no fixed version published and need a decision: replace, accept with mitigations, or wait.`);
+  if (noFix > 0) parts.push(`${plural(noFix, 'package')} ${noFix === 1 ? 'has' : 'have'} no fixed version published and ${noFix === 1 ? 'needs' : 'need'} a decision: replace, accept with mitigations, or wait.`);
   return parts.join(' ');
 }
 

@@ -150,3 +150,26 @@ One entry per milestone (or per notable session). Keep it factual.
     (before, only the direct one). The malicious path got the same "every route" treatment.
 - **Verified by:** 221 tests green (typecheck, lint); prompt snapshot diff reviewed (route moved to its own
   line, "or later" gone). UI evidence line updated; not browser-checked.
+
+### 2026-11-10 · M3 AI explanation
+- **Agent did:**
+  - Explainer port, a facts check that every explainer must pass, a template explainer, and AI-with-fallback
+    in the application layer. The AI's deadline is enforced even if the provider call ignores its abort signal.
+  - Migration 007: `scans.explanation`; drops the unused `findings.explanation` column.
+  - Prose is labelled AI or Template in the UI.
+  - A provider-neutral LLM layer with Anthropic as the first adapter, a shared LLM-client contract suite, and
+    `npm run eval` over 4 fixtures.
+- **Human asked:** make providers easy to switch. Agent added the `LlmClient` seam and registry, and a lint
+  boundary so only the provider adapter imports its SDK.
+- **Assumptions:**
+  - Anthropic SDK pinned to 1.3.0, the newest release older than two weeks; 1.7.0 was one day old.
+  - Model `claude-opus-5-5` at effort low (configurable through `LLM_MODEL`).
+  - Top 10 actions get AI text.
+  - Server-side refusal fallback on.
+  - AI is skipped when there is nothing to explain.
+- **Found along the way:**
+  - I committed step 2 with lint errors (the command chain didn't stop on them), then fixed and amended it
+    before moving on.
+  - The eval's soft signal caught that the template summary didn't name the malicious package; it does now.
+- **Verified by:** 267 tests green, typecheck, lint; `npm run eval` (template) 4/4; a live no-key demo scan
+  gave a complete report with template prose. Not yet verified: a live run with a real Anthropic key.

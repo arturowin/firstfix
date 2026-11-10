@@ -74,12 +74,15 @@ the OSV adapter passes the shared contract suite; candidate selection tests use 
 Never cut a test while keeping the claim it proves. If a guarantee isn't tested, remove it from the README.
 
 ## M3 · AI explanation
-- [ ] `Explainer` port; `LlmExplainer` with timeout → zod check (structure + allowed finding IDs) → `TemplateExplainer` fallback
-- [ ] Works with no `LLM_API_KEY`
-- [ ] `explanation_source` stored and shown
-- [ ] AI text never overwrites structured facts
-- [ ] `npm run eval`: small fixture set, checks IDs referenced exist, no invented versions, length limits
+- [x] `Explainer` port; `LlmExplainer` with timeout → zod check (structure + allowed finding IDs) → `TemplateExplainer` fallback
+- [x] Works with no `LLM_API_KEY`
+- [x] `explanation_source` stored and shown
+- [x] AI text never overwrites structured facts
+- [x] `npm run eval`: small fixture set, checks IDs referenced exist, no invented versions, length limits
 **Gate:** report is complete when the LLM call fails, times out, returns garbage, or there is no key.
+      Status: gate covered by tests (fails, times out, garbage, refusal, injected title, no key) and a live
+      no-key run. Pending: a live run with a real Anthropic key (`npm run eval` + one demo scan).
+- [x] Provider seam (user request): `LlmClient` + registry; Anthropic is the first provider
 
 ## M4 · Failure behavior (all REQUIRED)
 - [ ] Some OSV lookups fail → completed, partial, unchecked listed

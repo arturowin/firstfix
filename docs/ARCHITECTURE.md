@@ -319,10 +319,28 @@ Fix information shapes the action, not the rank.
   check how it got in, rotate secrets that were available where it was installed".
 
 ### Evidence vs AI text
-- AI writes only the summary paragraph and per-action "why it matters".
-- Output validated with zod: structure + only known finding IDs. Prose truth can't be validated (stated in README).
-- Timeout / invalid / no key → `TemplateExplainer`. `explanation_source` stored and shown.
-- Small fixture-based eval: `npm run eval`.
+- AI writes only the summary paragraph and per-action "why it matters" (top 10 actions; the rest get template
+  text). Each piece is labelled AI or Template in the UI; facts never come from it.
+- Every explainer's output, the template's included, passes `checkExplanation` (`src/domain/explanation.ts`):
+  exactly the expected action IDs (`<ecosystem>:<package>`), no version or advisory ID outside the scan data,
+  length limits, no "secure"/"safe"/"guarantee"/"fixed" ("no fixed version published" allowed). Prose truth
+  can't be validated (stated in README).
+- `application/explain.ts`: template for everything, AI for the summary + top actions only if it answers within
+  `LLM_TIMEOUT_MS` (enforced even if the call ignores its abort signal) and passes the check. A stopped job
+  propagates instead of falling back. Stored on `scans.explanation` (jsonb, with the fallback reason, not shown)
+  and `explanation_source`.
+- **Switching LLM providers** (`src/adapters/llm/`): `LlmExplainer` owns the prompt and the output schema and
+  talks to a narrow `LlmClient` (`generate` → schema-valid JSON; errors as neutral `LlmError` kinds). One adapter
+  per provider (`anthropic.ts` is the only file importing its SDK, enforced by lint); `registry.ts` picks it from
+  `LLM_PROVIDER` (default `anthropic`) with `LLM_API_KEY`, `LLM_MODEL` (default per provider: `claude-opus-5-5`),
+  `LLM_TIMEOUT_MS`. A new provider = an adapter + a registry line + passing `test/contract/llm-client.contract.ts`.
+- Anthropic adapter: structured output (`messages.parse` + zod format), effort `low`, server-side refusal
+  fallback on, no SDK retries; refusal / cut-off / unparseable → template.
+- Advisory titles are external text: they reach the model only inside a JSON data block marked as data, and the
+  check catches invented values regardless (tested with an injected title).
+- `npm run eval`: fixtures in `test/fixtures/eval/` (real demo findings, clean, malicious-only, major jump with an
+  injected title); hard checks = the facts check + provider errors; soft signals reported. Template only without
+  a key.
 
 ### Coding-agent handoff prompt
 Built from a template (no AI). Includes: repo, commit, packages with evidence; candidate changes
