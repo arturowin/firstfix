@@ -21,6 +21,8 @@ export interface ScanView {
   lockfilePath: string | null;
   /** Name of the advisory data source used, e.g. "OSV.dev". */
   advisorySource: string | null;
+  /** Deterministic one-line summary, written at completion. */
+  summaryLine: string | null;
   status: ScanStatus;
   stage: ScanStage | null;
   counts: ScanCounts;
@@ -83,6 +85,7 @@ export interface ClaimedScan {
 
 export interface Completion {
   advisorySource: string;
+  summaryLine: string;
   counts: ScanCounts;
   coverage: 'full' | 'partial';
   findings: FindingInput[];

@@ -1,7 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { defaultRegistry } from '../domain/ecosystems/registry.ts';
+import type { EcosystemRegistry } from '../domain/ecosystems/types.ts';
 import { parseRepoUrl } from '../domain/repo-url.ts';
-import type { ReportData, ScanRepository, ScanView } from '../ports/scan-repository.ts';
+import type { ScanRepository, ScanView } from '../ports/scan-repository.ts';
 import type { ScanSubmission, SubmitResult } from '../ports/scan-submission.ts';
+import { buildReport, type Report } from './report.ts';
 
 export type SubmitOutcome = SubmitResult | { kind: 'invalid'; error: string };
 
@@ -10,11 +13,17 @@ export class ScanService {
   private readonly submission: ScanSubmission;
   private readonly scans: ScanRepository;
   private readonly newId: () => string;
+  private readonly registry: EcosystemRegistry;
 
-  constructor(submission: ScanSubmission, scans: ScanRepository, newId: () => string = randomUUID) {
+  constructor(
+    submission: ScanSubmission,
+    scans: ScanRepository,
+    options: { newId?: () => string; registry?: EcosystemRegistry } = {},
+  ) {
     this.submission = submission;
     this.scans = scans;
-    this.newId = newId;
+    this.newId = options.newId ?? randomUUID;
+    this.registry = options.registry ?? defaultRegistry;
   }
 
   async submit(repoUrl: string, idempotencyKey: string | null): Promise<SubmitOutcome> {
@@ -34,7 +43,8 @@ export class ScanService {
     return this.scans.get(scanId);
   }
 
-  getReport(scanId: string): Promise<ReportData | null> {
-    return this.scans.getReport(scanId);
+  async getReport(scanId: string): Promise<Report | null> {
+    const data = await this.scans.getReport(scanId);
+    return data ? buildReport(data, this.registry) : null;
   }
 }

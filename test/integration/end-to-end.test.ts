@@ -111,6 +111,21 @@ describe('end to end: submit → worker → report', () => {
     expect(byPackage['request']?.[0]).toMatchObject({ candidateVersion: null, fixStatus: 'no_fix' });
     expect(byPackage['flatmap-stream']?.every((f) => f.isMalicious && f.fixStatus === 'no_fix')).toBe(true);
     expect(report?.unchecked).toEqual([{ ecosystem: 'npm', package: 'slash', version: '5.1.0', reason: 'unsupported_source' }]);
+
+    // The actionable report: what to do first, in plan order.
+    expect(report?.summary).toBe(
+      '1 known malicious package and 2 packages with known vulnerabilities (2 medium) in 106 of 107 dependencies checked. ' +
+        'Start with: remove flatmap-stream (known malicious package).',
+    );
+    expect(report?.actions.map((a) => [a.rank, a.package, a.kind, a.onSummary])).toEqual([
+      [1, 'flatmap-stream', 'remove_malicious', true],
+      [2, 'lodash', 'upgrade', true],
+      [3, 'request', 'no_fix', true],
+    ]);
+    expect(report?.actions[1]?.text?.steps[0]).toMatch(/candidate 4\.17\.21 .* `npm install lodash@4\.17\.21`/);
+    expect(report?.findings[0]?.package).toBe('flatmap-stream'); // findings ranked too
+    expect(report?.ciChecks).toEqual(['Dependabot alerts', '`npm audit` in CI']);
+    expect(report?.agentPrompt).toContain(`at commit ${SHA}`);
   });
 
   it('a missing repository ends failed with a clear reason, without retries', async () => {

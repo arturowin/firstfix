@@ -26,6 +26,7 @@ interface ScanRow {
   commit_sha: string | null;
   lockfile_path: string | null;
   advisory_source: string | null;
+  summary_line: string | null;
   status: ScanStatus;
   stage: ScanStage | null;
   total_deps: number;
@@ -47,6 +48,7 @@ function toView(r: ScanRow): ScanView {
     commitSha: r.commit_sha,
     lockfilePath: r.lockfile_path,
     advisorySource: r.advisory_source,
+    summaryLine: r.summary_line,
     status: r.status,
     stage: r.stage,
     counts: {
@@ -236,7 +238,7 @@ export class PostgresScanRepository implements ScanRepository {
         `UPDATE scans
             SET status = 'completed', coverage = $3,
                 total_deps = $4, checked_deps = $5, unsupported_deps = $6, failed_lookups = $7,
-                advisory_source = $8
+                advisory_source = $8, summary_line = $9
           WHERE id = $1 AND attempt = $2`,
         [
           claim.scanId,
@@ -247,6 +249,7 @@ export class PostgresScanRepository implements ScanRepository {
           c.counts.unsupportedDeps,
           c.counts.failedLookups,
           c.advisorySource,
+          c.summaryLine,
         ],
       );
       if (done.rowCount !== 1) throw new Error(`completion update matched ${String(done.rowCount)} rows under lock`);

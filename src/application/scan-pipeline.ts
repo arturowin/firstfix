@@ -1,4 +1,6 @@
 import { selectCandidate } from '../domain/candidate.ts';
+import { buildFixPlan, type PlanFinding } from '../domain/fix-plan.ts';
+import { summaryLine } from '../domain/report-text.ts';
 import { defaultRegistry, missingLockfileMessage } from '../domain/ecosystems/registry.ts';
 import type { EcosystemRegistry, LockfileFormat } from '../domain/ecosystems/types.ts';
 import { PermanentError } from '../ports/errors.ts';
@@ -99,9 +101,13 @@ export class ScanPipeline {
       }),
     );
 
+    const counts = { totalDeps, checkedDeps: packages.length, unsupportedDeps: uncheckable.length, failedLookups: 0 };
+    const plan = buildFixPlan(findings.map(toPlanFinding), (e) => this.registry.ecosystems.get(e)?.versionScheme ?? null);
+
     const saved = await this.scans.complete(claim, {
       advisorySource: this.vulns.source.name,
-      counts: { totalDeps, checkedDeps: packages.length, unsupportedDeps: uncheckable.length, failedLookups: 0 },
+      summaryLine: summaryLine({ counts, lockfilePath: found.path, actions: plan }),
+      counts,
       // "full" = every supported dependency in the root lockfile was checked (unsupported sources are listed
       // separately). Partial coverage from failed lookups arrives in M4.
       coverage: 'full',
@@ -125,4 +131,21 @@ export class ScanPipeline {
     }
     return null;
   }
+}
+
+function toPlanFinding(f: FindingInput): PlanFinding {
+  return {
+    ecosystem: f.ecosystem,
+    package: f.package,
+    installedVersion: f.installedVersion,
+    scope: f.scope,
+    isDirect: f.isDirect,
+    directParents: f.directParents,
+    advisoryId: f.advisory.id,
+    severity: f.advisory.severity,
+    isMalicious: f.advisory.isMalicious,
+    title: f.advisory.title,
+    candidateVersion: f.candidateVersion,
+    fixStatus: f.fixStatus,
+  };
 }

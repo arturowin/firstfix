@@ -103,7 +103,14 @@ describe('HTTP API', () => {
       await env.pool.query(`UPDATE scans SET status = 'completed', coverage = 'full' WHERE id = $1`, [scanId]);
       const res = await app.inject({ url: `/scans/${scanId}/report` });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({ scan: { id: scanId, status: 'completed' }, findings: [], unchecked: [] });
+      expect(res.json()).toMatchObject({
+        scan: { id: scanId, status: 'completed' },
+        summary: expect.any(String) as string,
+        actions: [],
+        findings: [],
+        unchecked: [],
+        agentPrompt: null,
+      });
     });
 
     it.each(['not-a-uuid', randomUUID()])('404 for %s', async (id) => {

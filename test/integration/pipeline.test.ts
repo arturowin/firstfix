@@ -28,7 +28,7 @@ const advisory = (id: string): Advisory => ({
   aliases: [],
   title: `title ${id}`,
   severity: 'high',
-  isMalicious: false,
+  isMalicious: id.startsWith('MAL-'), // this fake plays the adapter, which owns the malicious flag
   affectedRanges: [],
   references: [],
 });
@@ -87,6 +87,8 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
       commitSha: SHA,
       lockfilePath: 'package-lock.json',
       advisorySource: 'Test advisories',
+      // a@1.0.0 carries MAL-1 (malicious by id in this fake): the summary leads with it.
+      summaryLine: expect.stringMatching(/^1 known malicious package in 2 of 3 dependencies checked\. Start with: remove a/) as string,
       coverage: 'full',
       counts: { totalDeps: 3, checkedDeps: 2, unsupportedDeps: 1, failedLookups: 0 },
     });
@@ -101,7 +103,11 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
     const id = await newScan();
     const pipeline = new ScanPipeline({ scans, source: source(lockfile({})), vulns: vulns(new Map()) });
     expect(await pipeline.run(id, signal())).toBe('completed');
-    expect(await scans.get(id)).toMatchObject({ status: 'completed', counts: { totalDeps: 0, checkedDeps: 0 } });
+    expect(await scans.get(id)).toMatchObject({
+      status: 'completed',
+      counts: { totalDeps: 0, checkedDeps: 0 },
+      summaryLine: 'No dependencies to check in package-lock.json.',
+    });
   });
 
   it.each([

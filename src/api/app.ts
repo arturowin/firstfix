@@ -2,8 +2,9 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import type { Report } from '../application/report.ts';
 import type { ScanService } from '../application/scan-service.ts';
-import type { ReportData, ScanView } from '../ports/scan-repository.ts';
+import type { ScanView } from '../ports/scan-repository.ts';
 
 export interface AppDeps {
   scans: ScanService;
@@ -43,8 +44,17 @@ function scanJson(s: ScanView) {
   };
 }
 
-function reportJson(r: ReportData) {
-  return { scan: scanJson(r.scan), findings: r.findings, unchecked: r.unchecked };
+/** Report layout order: summary + coverage (in scan), actions, findings + unchecked, agent prompt. */
+function reportJson(r: Report) {
+  return {
+    scan: scanJson(r.scan),
+    summary: r.summary,
+    ciChecks: r.ciChecks,
+    actions: r.actions,
+    findings: r.findings,
+    unchecked: r.unchecked,
+    agentPrompt: r.agentPrompt,
+  };
 }
 
 /** Browser navigation to a shareable /scans/:id link gets the page; fetch() from the page gets JSON. */
