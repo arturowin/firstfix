@@ -21,9 +21,13 @@ export const npmVersionScheme: VersionScheme = {
       const lo = parse(range.introduced);
       if (!lo || v.compare(lo) < 0) return false;
     }
-    if (range.limit !== undefined && range.limit !== null) {
-      const limit = parse(range.limit);
-      if (!limit || v.compare(limit) >= 0) return false;
+    // OSV limits: affected only if below at least one; "*" (or none) = unlimited. Older stored rows carry one
+    // `limit`. An unparseable limit can't be evaluated, so it doesn't narrow the range (never hides an affected
+    // version).
+    const limits = range.limits ?? (range.limit != null ? [range.limit] : []);
+    if (limits.length > 0 && !limits.includes('*')) {
+      const parsed = limits.map(parse).filter((l): l is semver.SemVer => l !== null);
+      if (parsed.length === limits.length && !parsed.some((l) => v.compare(l) < 0)) return false;
     }
     if (range.fixed !== null) {
       const fixed = parse(range.fixed);

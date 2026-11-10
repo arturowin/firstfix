@@ -87,28 +87,35 @@ export function isMalicious(v: OsvVuln): boolean {
 
 /**
  * OSV events, in order, → ranges. Each `introduced` opens a range; the next `fixed` or `last_affected`
- * closes it; one left open affects every later version. `limit` is an upper bound, not a fix: it closes the
- * range with `limit` set and no fixed version. An explicit `versions` list is kept too, even next to ranges. GIT ranges (commit hashes) say nothing about package versions: skipped.
+ * closes it; one left open affects every later version. `limit` events bound the whole range (OSV: affected only
+ * below some limit; "*" = unlimited) and are never a fix. An explicit `versions` list is kept too, even next to
+ * ranges. GIT ranges (commit hashes) say nothing about package versions: skipped.
  */
 export function toRanges(entry: OsvAffected): AffectedRange[] {
   const out: AffectedRange[] = [];
   for (const range of entry.ranges ?? []) {
     if (range.type === 'GIT') continue;
+    const events = range.events ?? [];
+    // OSV evaluation: `limit` events apply to the whole range (every interval in it), not just the interval
+    // they follow; a version is affected only if it is below at least one limit; "*" means unlimited.
+    const limitEvents = events.flatMap((e) => (e.limit !== undefined ? [e.limit] : []));
+    const limits = limitEvents.length === 0 || limitEvents.includes('*') ? null : limitEvents;
+    const interval = (introduced: string, fixed: string | null, lastAffected: string | null): AffectedRange =>
+      limits === null
+        ? { kind: 'range', introduced, fixed, lastAffected }
+        : { kind: 'range', introduced, fixed, lastAffected, limits: [...limits] };
     let open: string | null = null;
-    for (const e of range.events ?? []) {
+    for (const e of events) {
       if (e.introduced !== undefined) {
-        if (open !== null) out.push({ kind: 'range', introduced: open, fixed: null, lastAffected: null });
+        if (open !== null) out.push(interval(open, null, null));
         open = e.introduced;
       } else if (open !== null && (e.fixed !== undefined || e.last_affected !== undefined)) {
-        out.push({ kind: 'range', introduced: open, fixed: e.fixed ?? null, lastAffected: e.last_affected ?? null });
-        open = null;
-      } else if (open !== null && e.limit !== undefined) {
-        // A limit bounds the range but isn't a fix: keep the bound, leave the fix unknown.
-        out.push({ kind: 'range', introduced: open, fixed: null, lastAffected: null, limit: e.limit });
+        out.push(interval(open, e.fixed ?? null, e.last_affected ?? null));
         open = null;
       }
+      // A `limit` event closes nothing: it bounds the whole range (above).
     }
-    if (open !== null) out.push({ kind: 'range', introduced: open, fixed: null, lastAffected: null });
+    if (open !== null) out.push(interval(open, null, null));
   }
   // OSV: a version is affected if it is in a range OR in the explicit list, so the list is kept alongside ranges.
   if (entry.versions && entry.versions.length > 0) {

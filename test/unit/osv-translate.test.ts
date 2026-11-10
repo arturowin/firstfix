@@ -52,10 +52,17 @@ describe('toRanges: OSV events → AffectedRange', () => {
     expect(r([{ introduced: '0' }])).toEqual([{ kind: 'range', introduced: '0', fixed: null, lastAffected: null }]);
   });
 
-  it('several ranges in one event list; a limit keeps its upper bound but is not a fix', () => {
+  it('several intervals in one event list; a limit bounds every interval of its range and is not a fix', () => {
     expect(r([{ introduced: '1.0.0' }, { fixed: '1.2.0' }, { introduced: '2.0.0' }, { limit: '3.0.0' }])).toEqual([
-      { kind: 'range', introduced: '1.0.0', fixed: '1.2.0', lastAffected: null },
-      { kind: 'range', introduced: '2.0.0', fixed: null, lastAffected: null, limit: '3.0.0' },
+      { kind: 'range', introduced: '1.0.0', fixed: '1.2.0', lastAffected: null, limits: ['3.0.0'] },
+      { kind: 'range', introduced: '2.0.0', fixed: null, lastAffected: null, limits: ['3.0.0'] },
+    ]);
+  });
+
+  it('limit "*" is unlimited: no bound is recorded', () => {
+    expect(r([{ introduced: '0' }, { fixed: '2.0.0' }, { introduced: '2.0.0' }, { limit: '*' }])).toEqual([
+      { kind: 'range', introduced: '0', fixed: '2.0.0', lastAffected: null },
+      { kind: 'range', introduced: '2.0.0', fixed: null, lastAffected: null },
     ]);
   });
 

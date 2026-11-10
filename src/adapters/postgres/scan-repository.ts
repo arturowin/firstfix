@@ -84,7 +84,8 @@ function neutralRanges(value: unknown): AffectedRange[] | null {
       str(x['introduced']) &&
       strOrNull(x['fixed']) &&
       strOrNull(x['lastAffected']) &&
-      (x['limit'] === undefined || strOrNull(x['limit']))
+      (x['limit'] === undefined || strOrNull(x['limit'])) &&
+      (x['limits'] === undefined || (Array.isArray(x['limits']) && x['limits'].every(str)))
     );
   });
   return ok ? (value as AffectedRange[]) : null;
