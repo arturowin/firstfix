@@ -232,11 +232,52 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
       vulns: vulns(new TransientError('osv_unavailable', 'OSV answered 503')),
     });
     await expect(pipeline.run(id, signal())).rejects.toBeInstanceOf(TransientError);
-    expect(await scans.get(id)).toMatchObject({ status: 'running', stage: 'scanning' });
+    // The UI shows what is being retried; the stage is cleared while not running.
+    expect(await scans.get(id)).toMatchObject({
+      status: 'retrying',
+      stage: null,
+      error: { code: 'osv_unavailable', message: 'OSV answered 503' },
+    });
 
-    // The retry (next attempt) completes normally.
+    // The retry (next attempt) claims it back to running and completes normally.
     const retry = new ScanPipeline({ scans, source: source(twoPackages), vulns: vulns(new Map()) });
     expect(await retry.run(id, signal())).toBe('completed');
+    expect(await scans.get(id)).toMatchObject({ status: 'completed', error: null });
+  });
+
+  it('a transient error on the last attempt ends the scan failed with the reason, and still throws', async () => {
+    const id = await newScan();
+    const pipeline = new ScanPipeline({ scans, source: source(twoPackages), vulns: vulns(new TransientError('osv_unavailable', 'OSV answered 503')) });
+    await expect(pipeline.run(id, signal(), { lastAttempt: true })).rejects.toBeInstanceOf(TransientError);
+    expect(await scans.get(id)).toMatchObject({
+      status: 'failed',
+      error: { code: 'osv_unavailable', message: 'Retries exhausted: OSV answered 503' },
+    });
+  });
+
+  it('an unexpected error (a bug) is retried like a transient one, without leaking internals', async () => {
+    const id = await newScan();
+    const pipeline = new ScanPipeline({ scans, source: source(twoPackages), vulns: vulns(new TypeError('x is undefined')) });
+    await expect(pipeline.run(id, signal())).rejects.toBeInstanceOf(TypeError);
+    expect(await scans.get(id)).toMatchObject({
+      status: 'retrying',
+      error: { code: 'internal_error', message: 'An unexpected error occurred while scanning' },
+    });
+  });
+
+  it('a stopped job (aborted signal) writes nothing and propagates', async () => {
+    const id = await newScan();
+    const job = new AbortController();
+    const pipeline = new ScanPipeline({
+      scans,
+      source: source(twoPackages),
+      vulns: vulns(new Map(), () => {
+        job.abort(new Error('job expired'));
+        return Promise.reject(new Error('aborted fetch'));
+      }),
+    });
+    await expect(pipeline.run(id, job.signal)).rejects.toThrow('aborted fetch');
+    expect(await scans.get(id)).toMatchObject({ status: 'running', stage: 'scanning', error: null });
   });
 
   it('if a newer attempt takes over mid-scan, the old one stops without writing', async () => {

@@ -4,8 +4,9 @@ import { GitHubRepoSource } from '../adapters/github/repo-source.ts';
 import { OsvVulnDatabase } from '../adapters/osv/vuln-database.ts';
 import { createPool } from '../adapters/postgres/pool.ts';
 import { PostgresScanRepository } from '../adapters/postgres/scan-repository.ts';
-import { ensureQueues, SCAN_QUEUE, type ScanJobData } from '../adapters/pgboss/queue.ts';
+import { ensureQueues, SCAN_QUEUE } from '../adapters/pgboss/queue.ts';
 import { ScanPipeline } from '../application/scan-pipeline.ts';
+import { startScanWorker } from './scan-worker.ts';
 import { TemplateExplainer } from '../adapters/template-explainer.ts';
 import { LlmExplainer } from '../adapters/llm/explainer.ts';
 import { llmClientFromEnv, llmTimeoutMs } from '../adapters/llm/registry.ts';
@@ -40,24 +41,12 @@ const pipeline = new ScanPipeline({
   },
 });
 
-await boss.work<ScanJobData>(SCAN_QUEUE, { localConcurrency: concurrency, pollingIntervalSeconds: 1 }, async ([job]) => {
-  if (!job) return;
-  const started = Date.now();
-  try {
-    const result = await pipeline.run(job.data.scanId, job.signal);
-    console.log(JSON.stringify({ msg: 'scan finished', scanId: job.data.scanId, attempt: job.retryCount, result, ms: Date.now() - started }));
-  } catch (err) {
-    // Re-thrown so pg-boss retries (transient errors, aborts, bugs).
-    console.error(
-      JSON.stringify({
-        msg: 'scan attempt failed, will be retried',
-        scanId: job.data.scanId,
-        attempt: job.retryCount,
-        error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
-      }),
-    );
-    throw err;
-  }
+await startScanWorker(boss, {
+  pipeline,
+  concurrency,
+  log: (entry) => {
+    console.log(JSON.stringify(entry));
+  },
 });
 console.log(`worker: listening on queue "${SCAN_QUEUE}" (concurrency ${concurrency})`);
 

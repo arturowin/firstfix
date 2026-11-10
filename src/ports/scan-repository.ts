@@ -120,6 +120,11 @@ export interface ScanRepository {
   ): Promise<boolean>;
   /** Findings + completion in one transaction that first locks the owned, non-terminal row. */
   complete(claim: ClaimedScan, completion: Completion): Promise<boolean>;
+  /**
+   * A transient error on a non-final attempt: `retrying` + reason, so the UI can say what is being retried.
+   * Only from `running` and only for the owning attempt; the next claim sets `running` again.
+   */
+  markRetrying(claim: ClaimedScan, reason: { code: string; message: string }): Promise<boolean>;
   /** Terminal outcome without findings. */
   finish(
     claim: ClaimedScan,

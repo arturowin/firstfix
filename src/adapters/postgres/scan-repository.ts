@@ -288,6 +288,15 @@ export class PostgresScanRepository implements ScanRepository {
     });
   }
 
+  async markRetrying(claim: ClaimedScan, reason: { code: string; message: string }): Promise<boolean> {
+    const res = await this.pool.query(
+      `UPDATE scans SET status = 'retrying', error_code = $3, error_message = $4
+        WHERE id = $1 AND attempt = $2 AND status = 'running'`,
+      [claim.scanId, claim.attempt, reason.code, reason.message],
+    );
+    return res.rowCount === 1;
+  }
+
   async finish(
     claim: ClaimedScan,
     outcome: { status: 'failed' | 'unsupported'; code: string; message: string },

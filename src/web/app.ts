@@ -248,7 +248,7 @@ function renderProgress(scan: ScanJson): void {
     scan.status === 'queued'
       ? 'Waiting for a worker…'
       : scan.status === 'retrying'
-        ? 'A temporary problem occurred; retrying…'
+        ? `A temporary problem occurred${scan.error ? ` (${scan.error.message})` : ''}. Retrying automatically…`
         : scan.stage === 'fetching'
           ? 'Fetching the lockfile…'
           : scan.stage === 'scanning'

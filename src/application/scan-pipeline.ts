@@ -22,8 +22,8 @@ export type RunResult =
  *
  * Error contract (docs/ARCHITECTURE.md "Failures"):
  * - PermanentError → the outcome is recorded and run() returns normally, so pg-boss does not retry.
- * - Anything else (TransientError, aborts, bugs) propagates, so pg-boss retries the job.
- *   `retrying` status, the last-attempt check and dead-lettering come in M4.
+ * - Anything else (TransientError, bugs) → `retrying` + reason (or `failed` on the last attempt), then rethrown
+ *   so pg-boss retries. Aborts write nothing and propagate.
  */
 export class ScanPipeline {
   private readonly scans: ScanRepository;
@@ -48,7 +48,12 @@ export class ScanPipeline {
     this.explain = deps.explain ?? null;
   }
 
-  async run(scanId: string, signal: AbortSignal): Promise<RunResult> {
+  /**
+   * One attempt. `lastAttempt`: the queue won't retry after this one, so a transient error ends the scan as
+   * `failed` instead of `retrying` (no code runs when the queue gives up; the dead-letter handler and the
+   * sweeper are the safety nets for attempts that die without reaching this point).
+   */
+  async run(scanId: string, signal: AbortSignal, options: { lastAttempt?: boolean } = {}): Promise<RunResult> {
     const claim = await this.scans.claim(scanId);
     if (!claim) return 'not_claimed';
     try {
@@ -58,7 +63,28 @@ export class ScanPipeline {
         const recorded = await this.scans.finish(claim, { status: err.outcome, code: err.code, message: err.message });
         return recorded ? err.outcome : 'stale';
       }
+      // The job was stopped (expired, claim lost, shutdown): another attempt owns what happens next.
+      if (signal.aborted) throw err;
+      await this.recordTransient(claim, err, options.lastAttempt === true);
       throw err;
+    }
+  }
+
+  private async recordTransient(claim: ClaimedScan, err: unknown, lastAttempt: boolean): Promise<void> {
+    // Known transient errors carry user-facing messages; anything else is a bug and stays internal.
+    const reason =
+      err instanceof TransientError
+        ? { code: err.code, message: err.message }
+        : { code: 'internal_error', message: 'An unexpected error occurred while scanning' };
+    try {
+      if (lastAttempt) {
+        await this.scans.finish(claim, { status: 'failed', code: reason.code, message: `Retries exhausted: ${reason.message}` });
+      } else {
+        await this.scans.markRetrying(claim, reason);
+      }
+    } catch {
+      // Recording failed too (e.g. the database is down): the original error is what gets retried; the
+      // dead-letter handler and the sweeper still close the scan if this was the end.
     }
   }
 
