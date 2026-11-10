@@ -7,6 +7,8 @@ import { PostgresScanRepository } from '../adapters/postgres/scan-repository.ts'
 import { ensureQueues, SCAN_QUEUE, type ScanJobData } from '../adapters/pgboss/queue.ts';
 import { ScanPipeline } from '../application/scan-pipeline.ts';
 import { TemplateExplainer } from '../adapters/template-explainer.ts';
+import { LlmExplainer } from '../adapters/llm/explainer.ts';
+import { llmClientFromEnv, llmTimeoutMs } from '../adapters/llm/registry.ts';
 
 const databaseUrl = process.env['DATABASE_URL'];
 if (!databaseUrl) {
@@ -23,14 +25,18 @@ boss.on('error', (err: unknown) => {
 await boss.start();
 await ensureQueues(boss);
 
+// No LLM_API_KEY → template explanations only (the app works without a key).
+const llm = llmClientFromEnv(process.env);
+console.log(JSON.stringify({ msg: 'explanations', llm: llm ? `${llm.provider}/${llm.model}` : 'none (template only)' }));
+
 const pipeline = new ScanPipeline({
   scans: new PostgresScanRepository(pool),
   source: new GitHubRepoSource({ token: process.env['GITHUB_TOKEN'] || undefined }),
   vulns: new OsvVulnDatabase(),
   explain: {
-    ai: null, // M3 step 2: LLM explainer from LLM_PROVIDER / LLM_API_KEY / LLM_MODEL
+    ai: llm ? new LlmExplainer(llm) : null,
     template: new TemplateExplainer(),
-    timeoutMs: Number(process.env['LLM_TIMEOUT_MS'] ?? 20_000),
+    timeoutMs: llmTimeoutMs(process.env),
   },
 });
 

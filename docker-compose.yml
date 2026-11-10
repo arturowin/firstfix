@@ -49,6 +49,11 @@ services:
       DATABASE_URL: postgres://scan:scan@postgres:5432/scan
       # Optional: raises GitHub's limit from 60 to 5000 requests/hour.
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # Optional: AI-written explanations. Without a key, a template writes them (the report is complete either way).
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-20000}
       WORKER_CONCURRENCY: "2"
     depends_on:
       migrate:

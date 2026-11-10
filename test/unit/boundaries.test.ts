@@ -47,6 +47,23 @@ describe('import boundaries', () => {
     expect(await violations('src/application/sample.ts', code)).toEqual([]);
   });
 
+  it.each([
+    'src/domain/sample.ts',
+    'src/application/sample.ts',
+    'src/adapters/llm/explainer.ts',
+    'src/adapters/osv/sample.ts',
+    'src/worker/main.ts',
+  ])('only the provider adapter may import an LLM SDK: %s rejects it', async (file) => {
+    expect(await violations(file, "import Anthropic from '@anthropic-ai/sdk';")).toEqual(['no-restricted-imports']);
+    expect(await violations(file, "import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';")).toEqual([
+      'no-restricted-imports',
+    ]);
+  });
+
+  it('the Anthropic adapter may import its SDK', async () => {
+    expect(await violations('src/adapters/llm/anthropic.ts', "import Anthropic from '@anthropic-ai/sdk';")).toEqual([]);
+  });
+
   it('adapters may use I/O', async () => {
     expect(await violations('src/adapters/sample.ts', "import pg from 'pg';")).toEqual([]);
   });
