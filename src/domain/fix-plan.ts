@@ -62,7 +62,6 @@ export interface ActionVersion {
   isDirect: boolean;
   directParents: string[];
   advisories: { id: string; severity: Severity; title: string | null; fixStatus: FixStatus; candidateVersion: string | null }[];
-  /** The highest per-advisory candidate: addresses every advisory that has one. */
   candidate: CandidateStep | null;
   /** When `candidate` is a major jump: the highest candidate that isn't, if it addresses some advisories. */
   compatibleCandidate: CandidateStep | null;
@@ -71,8 +70,7 @@ export interface ActionVersion {
   /** Advisories whose ranges don't place this version: see the advisory. */
   unplaced: string[];
   /**
-   * Advisories have candidate versions, but no version from them leaves any advisory (each is still listed as
-   * affected by another): no upgrade is recommended for this version.
+   * Advisory data provides candidates, but none can be verified to address an advisory for this version.
    */
   noUsefulCandidate: boolean;
 }
@@ -181,11 +179,9 @@ function planVersion(installed: string, findings: PlanFinding[], scheme: Version
     const highest = maxBy(versions, (a, b) => scheme.compare(a, b));
     if (highest !== undefined) {
       candidate = step(resolve(highest, true));
-      // The combined version can land where every advisory still lists it as affected. Never recommend an
-      // upgrade that addresses nothing: fall back to the option that addresses most (lowest version on a tie),
-      // or to no candidate at all.
-      // Only when the ranges show it: without stored ranges (older rows) "0" means "can't verify", not "none".
-      if (candidate.addresses === 0 && withCandidate.every((f) => f.affectedRanges !== null)) {
+      // Fall back to the candidate with the most verified improvements (lowest version on a tie).
+      // Missing ranges do not count as a verified improvement.
+      if (candidate.addresses === 0) {
         const options = [...new Set([...versions, ...versions.map((v) => resolve(v, true))])].map(step);
         const best = options.reduce<CandidateStep | null>(
           (b, o) =>

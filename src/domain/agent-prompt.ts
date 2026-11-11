@@ -116,7 +116,7 @@ function changeLines(a: Action, v: ActionVersion, hints: RemediationHints, check
       );
     }
   } else if (v.noUsefulCandidate) {
-    out.push('   - No upgrade recommended: no candidate version leaves any of these advisories. Do not change it; report it.');
+    out.push('   - No upgrade recommendation could be verified from the available advisory data. Report it for review and suggest rescanning to refresh the findings.');
   } else if (v.unresolved.length > 0) {
     out.push('   - No fixed version published: do not change it; report it as unresolved.');
   } else {

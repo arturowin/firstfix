@@ -149,7 +149,7 @@ export function describeAction(a: Action, hints: RemediationHints): ActionText {
       }
     } else if (v.noUsefulCandidate) {
       steps.push(
-        `${at}: no upgrade recommended. The advisories' candidate versions are each still listed as affected by another of these advisories; check the advisories for a release that leaves them all.`,
+        `${at}: no upgrade recommendation could be verified from the available advisory data. Rescan to refresh the findings.`,
       );
     } else if (v.unresolved.length > 0 || v.unplaced.length > 0) {
       steps.push(`${at}: no candidate version.`);

@@ -187,19 +187,34 @@ describe('grouping into actions', () => {
     );
     expect(a).toMatchObject({ kind: 'review', versions: [{ candidate: null, noUsefulCandidate: true }] });
     const steps = describeAction(a ?? expect.fail(), npm.hints).steps.join(' ');
-    expect(steps).toContain('no upgrade recommended');
+    expect(steps).toContain('no upgrade recommendation could be verified');
     expect(steps).not.toContain('npm install');
     const text = promptFor(a);
-    expect(text).toContain('No upgrade recommended: no candidate version leaves any of these advisories.');
+    expect(text).toContain('No upgrade recommendation could be verified');
     expect(text).not.toContain('Run: npm install');
   });
 
-  it('without stored ranges nothing is claimed as addressed', () => {
+  it('omits install advice when missing ranges leave no verified candidate', () => {
     const [a] = buildFixPlan(
-      [f({ package: 'lib', installedVersion: '1.0.0', advisoryId: 'A', candidateVersion: '1.2.0', fixStatus: 'candidate', affectedRanges: null })],
+      [
+        f({ package: 'lib', advisoryId: A_ID, candidateVersion: '1.0.2', fixStatus: 'candidate', affectedRanges: null }),
+        f({
+          package: 'lib',
+          advisoryId: B_ID,
+          candidateVersion: '1.0.1',
+          fixStatus: 'candidate',
+          affectedRanges: [range('0', '1.0.1'), { kind: 'versions', versions: ['1.0.1', '1.0.2'] }],
+        }),
+      ],
       scheme,
     );
-    expect(a?.versions[0]?.candidate).toMatchObject({ version: '1.2.0', addresses: 0 });
+    expect(a).toMatchObject({ kind: 'review', versions: [{ candidate: null, noUsefulCandidate: true }] });
+    const steps = describeAction(a ?? expect.fail(), npm.hints).steps.join(' ');
+    const prompt = promptFor(a);
+    expect(steps).toContain('no upgrade recommendation could be verified');
+    expect(prompt).toContain('No upgrade recommendation could be verified');
+    expect(steps).not.toContain('npm install');
+    expect(prompt).not.toContain('npm install lib@');
   });
 
   it('malicious: remove + rotate secrets, even when another advisory on it has a candidate', () => {
