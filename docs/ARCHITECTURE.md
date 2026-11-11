@@ -1,6 +1,6 @@
 # Architecture
 
-Scaner reviews the npm dependencies of a public GitHub repository at a specific commit. See the
+FirstFix reviews the npm dependencies of a public GitHub repository at a specific commit. See the
 [README](../README.md) for the product goals, setup, and demo.
 
 ## Components

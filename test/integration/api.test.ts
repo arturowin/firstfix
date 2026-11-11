@@ -20,7 +20,7 @@ describe('HTTP API', () => {
   beforeAll(async () => {
     env = await createTestEnv();
     webDir = await mkdtemp(path.join(tmpdir(), 'web-'));
-    await writeFile(path.join(webDir, 'index.html'), '<!doctype html><title>AI Scan Review</title>');
+    await writeFile(path.join(webDir, 'index.html'), '<!doctype html><title>FirstFix</title>');
     app = buildApp({
       scans: new ScanService(new PostgresScanSubmission(env.pool, env.boss), new PostgresScanRepository(env.pool)),
       checkReady: () => (ready ? Promise.resolve() : Promise.reject(new Error('down'))),

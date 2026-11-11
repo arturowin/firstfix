@@ -1,6 +1,8 @@
-# AI Scan Review
+# FirstFix
 
-Scaner reviews npm dependencies in public GitHub repositories. Paste a repository URL, follow the scan, and get a report that explains what to address first, why it matters, and how to verify the change.
+**Dependency security, in the order to fix it.**
+
+FirstFix reviews npm dependencies in public GitHub repositories. Paste a repository URL, follow the scan, and get a report that explains what to address first, why it matters, and how to verify the change.
 
 ## Quick start
 
@@ -23,7 +25,7 @@ Open `http://localhost:3000`. Compose starts Postgres, runs migrations, and star
 
 ### Try the demo
 
-Paste `https://github.com/arturowin/scan-review-demo` into Scaner. Look for the recommendation to remove `flatmap-stream`, the advisory evidence behind that recommendation, and the Git dependency the scanner couldn’t check.
+Paste `https://github.com/arturowin/scan-review-demo` into FirstFix. Look for the recommendation to remove `flatmap-stream`, the advisory evidence behind that recommendation, and the Git dependency the scanner couldn’t check.
 
 The demo repository intentionally pins vulnerable and malicious package versions. Scan it by URL and avoid installing its dependencies.
 

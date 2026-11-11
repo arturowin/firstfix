@@ -1,6 +1,6 @@
 import { TransientError } from '../ports/errors.ts';
 
-export const USER_AGENT = 'ai-scan-review';
+export const USER_AGENT = 'firstfix';
 
 /** fetch with a per-call timeout combined with the job's signal. Network failures and timeouts are transient. */
 export async function fetchWithTimeout(

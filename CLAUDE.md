@@ -1,4 +1,4 @@
-# AI Scan Review — project guide for Claude Code
+# FirstFix — project guide for Claude Code
 
 A user submits a public GitHub repo URL, follows scan progress, and gets a prioritized, explained
 dependency-security review with recommended next actions. Read `docs/ARCHITECTURE.md` and `docs/PLAN.md` before any work.
