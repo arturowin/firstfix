@@ -165,12 +165,6 @@ export function buildInstallGraph(
   return { direct, reach, complete: true };
 }
 
-/** Names along the walk from its start to `at`, rebuilt from predecessor pointers. */
-/**
- * Names along the walk from its start to `at`, rebuilt from predecessor pointers. Never walks more than
- * MAX_PATH_SEGMENTS pointers: a deeper path keeps its root, PATH_ELLIPSIS, and its last segments, so memory and
- * work per path are bounded however deep the chain.
- */
 function pathFrom(at: string, prev: Map<string, string | null>, root: string, depth: number): string[] {
   const keep = depth <= MAX_PATH_SEGMENTS ? depth : MAX_PATH_SEGMENTS - 2;
   const tail: string[] = [];
@@ -186,7 +180,6 @@ function pathFrom(at: string, prev: Map<string, string | null>, root: string, de
  */
 function offerPath(r: Reach, length: number, build: () => string[]): void {
   const worst = r.paths[r.paths.length - 1];
-  // Compare by true depth, not stored length: abbreviated paths are all MAX_PATH_SEGMENTS long.
   if (r.paths.length >= PATHS_PER_LOCATION && worst !== undefined && length >= depthOf(worst)) return;
   const path = build();
   if (path.includes(PATH_ELLIPSIS)) r.truncated = true;

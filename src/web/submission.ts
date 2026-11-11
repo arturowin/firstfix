@@ -34,7 +34,6 @@ export class SubmissionFlow {
     this.newKey = newKey;
   }
 
-  /** What the submit controls should show: idle (enabled), submitting or scanning (disabled). */
   get phase(): 'idle' | 'submitting' | 'scanning' {
     return this.inFlight ? 'submitting' : this.followed !== null ? 'scanning' : 'idle';
   }

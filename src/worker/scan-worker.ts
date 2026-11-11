@@ -32,7 +32,6 @@ export async function startScanWorker(boss: PgBoss, deps: ScanWorkerDeps): Promi
     async ([job]) => {
       if (!job) return;
       const started = Date.now();
-      // retryCount counts from 0; the attempt with retryCount === retryLimit is the last (verified in M0).
       const lastAttempt = job.retryCount >= job.retryLimit;
       try {
         const result = await deps.pipeline.run(job.data.scanId, job.signal, { lastAttempt });

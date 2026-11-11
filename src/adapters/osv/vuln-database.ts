@@ -48,7 +48,6 @@ export class OsvVulnDatabase implements VulnDatabase {
   async lookup(packages: PackageRef[], signal: AbortSignal): Promise<LookupResult> {
     const { ids: idsByPackage, failed, partial } = await this.queryIds(packages, signal);
 
-    // Details once per advisory id, shared across packages; a failed id fails every package that cites it.
     const uniqueIds = [...new Set([...idsByPackage.values()].flat())].sort();
     const details = new Map<string, OsvVuln>();
     const failedIds = new Set<string>();
