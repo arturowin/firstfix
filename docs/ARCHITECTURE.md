@@ -1,29 +1,35 @@
 # Architecture
 
-## Product interpretation
-Goal: help a repository owner turn security findings into a prioritized next step.
-Assumptions: the user shouldn't need security expertise to understand the
-report, and many will apply fixes through a coding agent, given the product space.
-
-- "connect my repo" → paste a public GitHub URL, no setup
-- "AI-assisted" → AI explains; facts come from the scan
-- "code or dependencies" → npm dependencies, deliberately: findings are verifiable
-- "not a raw report" → summary + up to three next actions, not a list
-- "what I should do next" → recommended next actions grouped by package + a coding-agent handoff prompt
-- "product, not an API" → real UI states, live progress, shareable report URL
-
-Out of scope (stated in README): private repos (next: GitHub App), SAST, secrets, reachability analysis.
+Scaner reviews the npm dependencies of a public GitHub repository at a specific commit. See the
+[README](../README.md) for the product goals, setup, and demo.
 
 ## Components
-Two processes share one PostgreSQL database.
+The Fastify API and background worker share one PostgreSQL database. GitHub and OSV requests can take
+time or fail temporarily, so the API returns a scan ID after recording the job. The worker controls
+scan concurrency and handles retries. Using PostgreSQL for both scan data and the queue lets the API
+create the scan and enqueue its job in one transaction.
 
 - **API** (`src/api/main.ts`): HTTP routes (zod, Idempotency-Key), `ScanService`, static UI.
-  Uses ports `ScanRepository`, `JobQueue`.
+  Uses the submission and scan repository ports.
 - **Worker** (`src/worker/main.ts`): `ScanPipeline` = claim → resolve SHA → find a supported lockfile @SHA →
   parse with its ecosystem's format → advisory lookup (OSV) → rank → build actions → explain → save. Uses ports `RepoSource`, `VulnDatabase`,
   `Explainer`, `ScanRepository`.
 - **Adapters**: GitHub REST API, OSV.dev (the advisory source; see "Advisory source"), LLM (+ template fallback), Postgres, pg-boss.
 - Plain composition root per process; no DI framework. Contract tests show adapters are substitutable.
+
+## Project layout
+
+```text
+src/api/           HTTP routes and API entry point
+src/worker/        Queue handlers and worker entry point
+src/application/   Scan orchestration and report assembly
+src/domain/        Lockfile parsing, ranking, and remediation rules
+src/ports/         Interfaces for application dependencies
+src/adapters/      GitHub, OSV, Postgres, pg-boss, and explainers
+src/web/           Browser UI
+migrations/        PostgreSQL schema migrations
+test/              Unit, integration, and contract tests
+```
 
 ## Data model (current: migrations 001-010)
 ```
@@ -68,14 +74,14 @@ Store `package` and `candidate_version` on findings so grouping into actions is 
 Other outcomes: `unsupported` (no supported lockfile, reason stored), `failed` (unrecoverable or
 retries exhausted). `retrying` while a transient error is being retried.
 Terminal: `completed`, `unsupported`, `failed`.
-**Every outcome and where it is tested (M4 gate):**
+**Scan outcomes and test coverage**
 
 | Outcome | How it is reached | Test |
 |---|---|---|
 | `queued` | submission: scan row + job in one transaction | `integration/submission`, `integration/api` |
 | `running` (fetching → scanning → analyzing) | claim, then stage writes | `integration/pipeline`, `integration/failures` (mid-scan) |
 | `completed`, coverage `full` | all supported deps checked | `integration/end-to-end`, `integration/pipeline` |
-| `completed`, coverage `partial` | some advisory lookups failed | `integration/pipeline`, `contract/osv`, `contract/vuln-database.contract` |
+| `completed`, coverage `partial` | one or more advisory lookups failed or were incomplete, and at least one package returned evidence | `integration/pipeline`, `contract/osv`, `contract/vuln-database.contract` |
 | `completed`, nothing checkable | all deps from unsupported sources | `integration/pipeline` |
 | `unsupported` | no lockfile, lockfile v1, invalid JSON, empty repo, too large | `integration/pipeline`, `contract/github` |
 | `retrying` | transient error (or bug) on a non-final attempt | `integration/pipeline`, `integration/failures` |
@@ -85,8 +91,8 @@ Terminal: `completed`, `unsupported`, `failed`.
 | `failed`: job finished or missing | sweeper | `integration/failures` |
 | stale attempt / duplicate job / zombie | attempt guard, `failIfOpen` bumps attempt | `integration/scan-repository`, `integration/pipeline`, `integration/failures` |
 
-Progress is persisted on the scan row; the UI polls `GET /scans/:id`. Stage labels use real counts
-("checked 80 of 142").
+The browser polls `GET /scans/:id` for persisted progress. During advisory lookup, the UI shows
+how many dependencies it is checking.
 
 ## Contracts
 
@@ -103,23 +109,23 @@ Progress is persisted on the scan row; the UI polls `GET /scans/:id`. Stage labe
 - Normalize URL: lowercase owner/repo, strip `.git`, trailing slash; only `github.com`.
 
 ### Submission
-Scan row + pg-boss job created in ONE transaction. Verified in M0 (pg-boss 12.38): `send(..., { db })`
+The scan row and pg-boss job are created in one transaction. With pg-boss 12.38, `send(..., { db })`
 with `db.executeSql` bound to our transaction's client joins that transaction; rollback leaves no job.
 `send` returns `null` only when it dedupes (duplicate `id` or singleton options); treat `null` as an error
-and roll back, so a scan never exists without a job.
+and roll back the submission.
 Admission control in the same transaction: a transaction-scoped advisory lock serializes an exact count of
 outstanding scans against `MAX_OUTSTANDING_SCANS`; the Idempotency-Key is checked again under that lock, so a
 concurrent replay of the request that took the last slot gets its scan (or 409), never 503. The API also has a
-per-client limit on `POST /scans` (`SUBMIT_RATE_PER_MINUTE`, 429).
+fixed one-minute per-client limit on `POST /scans` (`SUBMIT_RATE_PER_MINUTE`, 429). Each API instance
+keeps its own rate-limit counters in memory.
 
 ### Attempt ownership
 - Claim: increment `attempt`, skip if terminal (duplicate delivery is a no-op).
-- Every scan-row write: `WHERE id = $1 AND attempt = $2`; 0 rows → stale, stop quietly.
+- Worker progress and outcome writes match `id` and `attempt`; 0 matching rows means the worker no
+  longer owns the scan. The claim and recovery paths advance the attempt as described below.
 - Status changes set only `status` (+ outcome fields). A `BEFORE UPDATE` trigger on `scans` does the
   bookkeeping: sets `updated_at`, clears `stage` unless `running`, stamps `completed_at` on entering a terminal
-  state, and refuses to leave a terminal state (a rescan is a new scan). So the minimal failure updates below
-  can never be rejected on a side field, which would leave a scan stuck. In M1 every status change still goes
-  through one repository helper.
+  state, and prevents terminal scans from reopening. A rescan creates a new scan.
 - Findings + completion:
 ```sql
 BEGIN;
@@ -142,15 +148,14 @@ COMMIT;
   ("Retries exhausted: <reason>") instead. A job whose signal aborted (expired, stopped) writes nothing.
 - Unrecoverable (repo not found/private, other 403) and `unsupported`: mark the scan (attempt-guarded),
   then **return normally — do not throw**, or pg-boss will retry a permanent failure.
-- Some advisory lookups fail → `completed`, coverage `partial`, failed ones in `unchecked_deps`.
-- All lookups fail → `failed`.
+- Failed or incomplete lookups produce a partial report when at least one package lookup succeeds or
+  returns partial evidence. Both outcomes are listed in `unchecked_deps`.
+- If every queryable package's lookup fails outright, retry with backoff and mark the scan `failed` when
+  attempts run out.
 - AI failure never fails a scan and never affects coverage.
 
-### Retries exhausted / stuck scans (no code runs when pg-boss gives up)
-- **Last attempt throws:** the worker compares `job.retryCount` with `retryLimit` (`work(..., { includeMetadata: true })`,
-  verified in M0); on the final attempt it marks the scan `failed` ("retries exhausted: <reason>") instead of
-  `retrying`, then throws.
-- **Dead letter (supported, verified in M0):** the scan queue has `deadLetter` set. pg-boss copies the job's
+### Exhausted retries and lost jobs
+- **Dead letter.** the scan queue has `deadLetter` set. pg-boss copies the job's
   data to the dead-letter queue when retries are exhausted, both after a throw and after the final attempt
   expires or misses its heartbeat (worker crash). Its handler marks the scan `failed` only if still
   non-terminal. It does not check `attempt` (the attempt that died never finished).
@@ -161,12 +166,12 @@ COMMIT;
   `deleteAfterSeconds` (finished, default 7 days) or `retentionSeconds` (never started, default 14 days).
   With dead-lettering covering crashes, the sweeper is defence in depth (DLQ handler down, job deleted). A job that is still queued, retrying or active is left alone, so queue
   backlog, backoff and worker downtime never fail a healthy scan.
-- Implemented in M4 (`application/lost-scans.ts`, wired in `worker/scan-worker.ts`): the sweeper runs in every
+- The sweeper (`src/application/lost-scans.ts`, wired in `src/worker/scan-worker.ts`) runs in every
   worker every 60 s (`SWEEP_INTERVAL_MS`) with staleness 600 s (`SWEEP_STALE_AFTER_SECONDS`: expiry 300 s +
   backoff + margin); several workers sweeping at once is harmless (the update only matches open scans).
   Each sweep checks at most 500 stale scans in pages of 100, resuming from where the last sweep stopped (keyset
   cursor on `(updated_at, id)`, kept in memory) and wrapping at the end, so a backlog of healthy stale scans
-  can't hide a lost one (review finding, M4).
+  can't hide a lost one.
 - Dead-letter handler and sweeper both do
   `UPDATE scans SET status='failed', attempt = attempt + 1, ... WHERE id = $1 AND status NOT IN (terminal)`.
   Bumping `attempt` fences any zombie worker: its later writes match 0 rows and it stops.
@@ -179,13 +184,13 @@ handling); Docker restarted it and the same scan id completed ~71 s later (attem
 scan and one job in the database. `docker kill` is not a crash for this purpose: Docker treats it as a manual
 stop and `unless-stopped` leaves the container down; `docker compose stop` stops it as intended.
 
-### Queue settings (pg-boss 12, verified in M0 — see `test/contract/pgboss.test.ts`)
-Everything below is tested there unless marked as read from the source or as a proposal.
+### Queue settings
+See `test/contract/pgboss.test.ts` for the pg-boss 12 contract checks.
 - `heartbeatSeconds` (min 10): a worker that stops heartbeating (crash, kill -9) has its job retried after
   about that long. Without it, a crashed job only comes back after `expireInSeconds` (default 15 min).
   `work()` refreshes the heartbeat every `heartbeatSeconds / 2` while the handler runs, so a healthy
   attempt longer than `heartbeatSeconds` is not retried or run twice (tested with a 25 s handler, 10 s heartbeat).
-  Adopted in M1: `heartbeatSeconds: 30`, `expireInSeconds: 300` (upper bound on one scan attempt).
+  The scan queue uses `heartbeatSeconds: 30` and `expireInSeconds: 300` (upper bound on one scan attempt).
 - Missed heartbeat on the last attempt → job `failed` and dead-lettered, same as expiry.
 - `job.signal` is aborted when the job expires (tested) and, per the 12.38 source (`manager.js`
   `#processJobs`), when a heartbeat refresh finds the claim gone. Either way the attempt no longer owns the
@@ -194,9 +199,9 @@ Everything below is tested there unless marked as read from the source or as a p
   stale attempt (both tested). This fences pg-boss's job row only; our `scans.attempt` guard is still what
   fences scan rows.
 - Backoff: with `retryBackoff: true` the delay before retry n is about `retryDelay × 2^(n-1)` (with jitter),
-  capped by `retryDelayMax`. Adopted for scans in M1: `retryLimit: 3`, `retryDelay: 5`, `retryBackoff: true`,
+  capped by `retryDelayMax`. The scan queue uses `retryLimit: 3`, `retryDelay: 5`, `retryBackoff: true`,
   `retryDelayMax: 60`.
-- `send` accepts a caller-chosen `id`: the job id **is** the scan id (adopted in M1; one id to trace).
+- `send` accepts a caller-chosen `id`: the job id **is** the scan id (one ID to trace).
 
 ### Supported input
 - `package-lock.json` at repo root, `lockfileVersion` 2 or 3. Otherwise `unsupported` with reason
@@ -206,10 +211,9 @@ Everything below is tested there unless marked as read from the source or as a p
 - `full` coverage = every supported dependency in the root lockfile was checked. Says nothing about the
   rest of the repository.
 
-### Ecosystems (npm implemented; others can be added without touching the pipeline)
-Only npm is implemented. The ecosystem-specific parts sit behind small seams so another ecosystem is a
-few pure modules plus a registry entry, not a rewrite. Everything else (ranking, malicious handling,
-attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
+### Ecosystem extension points
+npm is the implemented ecosystem. Format parsing, version comparisons, and remediation guidance are
+registered separately from the scan lifecycle, ranking, and attempt-guarded writes.
 
 - **Ecosystem id:** we use OSV's ecosystem names as our canonical ids (`npm`, later e.g. `PyPI`, `crates.io`,
   `RubyGems`, `Go`, `Packagist`, `NuGet`). A naming choice, not a dependency: the OSV adapter passes them
@@ -237,9 +241,6 @@ attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
   no lock (plain `requirements.txt`, Maven `pom.xml`) need dependency resolution first: a different problem.
 - **Proof:** a test-only fake ecosystem (own file name, parser, version scheme) goes through the pipeline with
   GitHub and OSV mocked; nothing outside the registry changes.
-- Not adopted (possible later): one pinned `GET /repos/{o}/{r}/git/trees/{sha}` to list root files, so an
-  unsupported repo gets "found poetry.lock (PyPI): not supported yet". Costs one call of the 60/hour
-  unauthenticated limit.
 
 ### GitHub fetching
 - Resolve SHA (two calls): `GET /repos/{owner}/{repo}` for the default branch (also detects not found/private),
@@ -271,13 +272,12 @@ attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
   reason `unsupported_source`.
 - Scope: `dev: true` or `devOptional: true` → dev; `optional: true` → optional (runtime); neither → runtime.
 - Direct = declared by the project: the root package's or a workspace folder's `dependencies` /
-  `devDependencies` / `optionalDependencies`, at the location that declaration resolves to (M2 decision:
-  workspace declarations count, since the repo owner wrote them).
+  `devDependencies` / `optionalDependencies`, at the location that declaration resolves to.
 - Graph (`src/domain/ecosystems/npm/graph.ts`): names resolve like Node (`<dir>/node_modules/<name>`, then
   upwards); installed packages contribute `dependencies`, `optionalDependencies`, `peerDependencies` (not
   `devDependencies`); links into workspace folders end a walk. Breadth-first from each direct dependency gives
   every direct parent and the shortest path from each; paths are capped at 5 per package version.
-  Bounded while walking (review finding): predecessor pointers instead of path copies, at most 5 paths built
+  Traversal bounds: predecessor pointers instead of path copies, at most 5 paths built
   per location, and a 5,000,000-step budget past which parents/paths are left empty (never partly filled);
   a 42 KB worst-case lockfile went from ~185 MiB / 1.2 s to ~24 MiB / 0.1 s. Paths are built from at most 12
   predecessor pointers (deeper ones keep the root, "…" and the last 10), so deep chains stay bounded too
@@ -288,7 +288,7 @@ attempt-guarded writes, lifecycle, UI states) is already ecosystem-neutral.
 - Package names and aliases must be valid npm names (`src/domain/ecosystems/npm/name.ts`): they come from a
   repository-controlled file and end up in suggested commands. Invalid ones are set aside as `invalid_name`
   (migration 008): not looked up, not a parent, not in paths, no command. Command builders validate names and
-  versions again and return no command rather than an unvalidated one (review finding).
+  versions again and omit the command if validation fails.
 - Names or versions with control characters or invalid Unicode are also `invalid_name`, shown in a storable,
   visible form (control characters as the text `\uXXXX`, unpaired surrogates as U+FFFD); nothing is dropped.
 - Finding granularity: one finding per `package@version` × advisory. Install paths are aggregated onto it
@@ -302,13 +302,13 @@ OSV.dev is the only advisory source implemented. It sits behind the `VulnDatabas
 - **Contract:** for each `{ ecosystem, name, version }` the source returns its advisories, each with:
   `id`, `aliases`, `title`, `severity` (`critical|high|medium|low|unknown`), `isMalicious`, `affectedRanges`
   (neutral type below), `references`. Packages it could not check are reported per package
-  (`lookup` → `{ advisories, failed }`), so coverage can be partial; it rejects only when the job's signal
+  (`lookup` → `{ advisories, failed, incomplete }`), so coverage can be partial; it rejects only when the job's signal
   aborts, never with provider HTTP errors. The OSV adapter retries each call once; a failed batch fails its
-  packages, a failed detail fetch fails every package citing that advisory. Responses are validated inside the
+  packages. A failed detail fetch makes the packages citing that advisory incomplete. Responses are validated inside the
   same boundary: a malformed batch entry fails its package, a malformed record counts as a failed fetch, and
-  translation is isolated per package (review finding, M4).
+  translation is isolated per package.
 - Pipeline: some failed → `completed`, `partial`, `lookup_failed` rows, `failed_lookups`, said in the summary
-  line; all failed → `TransientError` (retried; `failed` with the reason once retries run out, M4 decision).
+  line; all failed → `TransientError` (retried; `failed` with the reason once retries run out).
 - **Neutral range type** (`src/domain/advisory.ts`, replaces the raw `affectedRanges: unknown[]`):
   `AffectedRange = { kind: 'range'; introduced; fixed | null; lastAffected | null } | { kind: 'versions'; versions }`.
   `introduced: '0'` = all earlier versions; `fixed: null` = no fix published; both `fixed` and `lastAffected`
@@ -320,10 +320,9 @@ OSV.dev is the only advisory source implemented. It sits behind the `VulnDatabas
   `isMalicious`; it never inspects id prefixes from a provider.
 - **Shared contract tests:** one suite every `VulnDatabase` adapter must pass, run against recorded responses:
   ranges normalised, malicious flagged, no-fix represented, unknown id handled, transient vs permanent errors
-  classified, ecosystem and exact-name filtering. A second provider is then proven, not claimed.
+  classified, and filtering by ecosystem and exact name.
 - **Data source is named in the report** (e.g. "Advisory data: OSV.dev, fetched <date>"): providers differ in
   coverage (another source may lack OpenSSF malicious-package records) and in severity labels.
-- Not planned: several sources at once (a composite adapter merging by id and aliases). Nothing above blocks it.
 
 ### OSV adapter (the current advisory source)
 - `POST /v1/querybatch`: max 1000 queries per call → chunk. Results contain only `{ id, modified }` per vuln
@@ -332,7 +331,7 @@ OSV.dev is the only advisory source implemented. It sits behind the `VulnDatabas
   own result. Re-send just that query with `page_token: <token>`; pages don't overlap.
 - Details: `GET /v1/vulns/{id}` once per unique advisory ID (dedupe across packages), concurrency limit
   (e.g. 8), timeout + retry per call.
-- Shapes verified in M0 (fixtures in `test/fixtures/osv/`):
+- Response shapes covered by fixtures in `test/fixtures/osv/`:
   - One advisory lists many `affected` entries: other packages and other ecosystems (e.g. lodash advisory
     also covers `lodash-es`, `lodash-rails`/RubyGems). Use only entries with the scanned package's ecosystem
     and the exact name.
@@ -363,12 +362,13 @@ OSV.dev is the only advisory source implemented. It sits behind the `VulnDatabas
   it still counts as not fully checked. Both feed `failed_lookups`, `unchecked_deps` (`lookup_failed`) and
   `coverage: partial`.
 - Severity: GHSA label from `database_specific.severity` when present; otherwise `unknown` (labelled).
-  No CVSS parsing in this version (stated as next step).
+  CVSS vectors are outside the current severity calculation.
 
 ### Ranking policy (deterministic)
 1. Known malicious packages first (advisories with `isMalicious`; with OSV, the `MAL-` records). Action: remove and rotate secrets, not upgrade.
 2. Severity: critical › high › medium › low › unknown (labelled, never hidden).
-3. Tie-breakers: runtime before dev; direct before transitive.
+3. Tie-breakers: runtime before optional before dev, direct before transitive, then package name.
+   Individual findings tied on those fields are sorted by installed version and advisory ID.
 Fix information shapes the action, not the rank.
 
 ### Recommended next actions
@@ -382,25 +382,22 @@ Fix information shapes the action, not the rank.
   (0.3 → 0.4). Downgrades are never jumps.
 - Candidate version = the fix event in the affected range that contains the installed version, using the
   ecosystem's version scheme. Labelled "candidate"; compatibility, resolution and tests still to verify.
-  Flag major-version jumps. No version scheme for the ecosystem → no candidate (see "Ecosystems").
+  Flag major-version jumps. No version scheme for the ecosystem → no candidate (see [Ecosystem extension points](#ecosystem-extension-points)).
 - Transitive package → name the direct parent that pulls it in.
 - No fix event → "no fixed version published: review the advisory and upstream guidance, assess exposure".
 - Counts say "addresses N advisories according to advisory data"; only a rescan confirms.
-- Several advisories on one package@version: start from the highest per-advisory candidate, then check it
-  against **every** advisory's stored ranges (an advisory can affect separate intervals, e.g. `<1.2.0` and
-  `[2.0.0, 2.2.0)`); while it sits inside a range that has a fix, move to that fix. "Addresses N" counts only
-  advisories with no range containing the proposed version. The report reads `findings.affected_ranges` for
-  this; rows from before migration 003 (raw OSV JSON) read back as null and nothing is claimed from them
-  (migration 003's comment saying the column is never read is out of date; applied migrations aren't edited).
-  Review finding, M2. If that
-  crosses a major version while a lower candidate would fix some advisories, show both ("4.x fixes 2 of 3;
-  5.x needed for the third") and flag the major jump. Advisories with no fix are listed in the action
-  as unresolved by any upgrade.
-- The final candidate is checked against every advisory with stored ranges: if it addresses none, the plan
-  falls back to the option addressing most (lowest version on a tie); if none addresses anything, no upgrade
-  is recommended (`noUsefulCandidate`, action kind `review`, no command). Each candidate lists what it still
-  leaves (`stillAffected`), in the report and in the agent prompt. Rows without stored ranges keep their
-  candidate ("can't verify" isn't "none").
+- For several advisories on the same installed version, the planner starts from the highest candidate and
+  advances to a known fix when the proposed version still falls in an affected interval. It scores versions
+  using the available ranges and explicit version lists for advisories with candidates. Missing ranges do
+  not count as verified improvements. Advisories without a published fix are shown separately.
+- If the proposed version addresses zero verified advisories, the planner checks alternatives and selects the
+  one that addresses the most, preferring the lower version on a tie. If none qualifies, the action requires
+  review. The report and agent prompt explain that no upgrade could be verified and omit the package-specific
+  install command. The report and prompt name advisories that still affect a suggested version. The report
+  can also show a lower candidate that addresses some advisories without a major jump.
+- Recommendations are rebuilt when the report is read. Older findings can lack the stored range data needed
+  to verify a candidate. Pre-migration 003 rows with raw OSV range data read back as null. The same guard
+  applies to these older reports.
 - Malicious entries usually have no ranges or fix: separate path, action "remove the package,
   check how it got in, rotate secrets that were available where it was installed".
 
@@ -414,11 +411,11 @@ Fix information shapes the action, not the rank.
   or share secrets, tokens or environment data. Package names are masked before checking, so `safe-buffer` is
   an identifier, not a claim. Prose truth can't be validated (stated in README).
 - AI prose stays in the human-facing report. The coding-agent prompt is template-only: an agent acts on it,
-  so model text there would be an injection path (review finding; reverted `ef17a53`).
+  so it uses validated structured data for instructions the agent will act on.
 - The template bounds its own length (package names are unbounded) and describes lockfile scope only: "Marked as
   a runtime/development dependency in the lockfile; … wasn't assessed". If the template still fails the check
   or throws, fixed minimal sentences that name nothing stand in, with the reason stored. Explanation problems
-  never fail a scan (review finding, M3).
+  never fail a scan.
 - `application/explain.ts`: template for everything, AI for the summary + top actions only if it answers within
   `LLM_TIMEOUT_MS` (enforced even if the call ignores its abort signal) and passes the check. A stopped job
   propagates instead of falling back. Stored on `scans.explanation` (jsonb, with the fallback reason, not shown)
@@ -441,12 +438,12 @@ Built from a template (no AI), from validated structured fields only, because an
 names, aliases and parents pass the ecosystem's name rules (`RemediationHints.isValidPackageName`), versions its
 version scheme; advisory IDs, severities, scopes, the repository URL, commit and lockfile path match fixed
 formats. Advisory titles and all prose (AI or template) are left out. Anything failing validation is omitted
-with a note, which also protects scans stored before validation existed (review finding). Includes repo,
+with a note, which also covers scans stored before validation existed. Includes repo,
 commit, packages with evidence; candidate changes separated from facts; instructions to inspect the dependency
 graph first, keep unrelated changes, use the ecosystem's upgrade command, stop and report on major-version
 jumps, run tests, rescan, report unresolved items. User sees a preview before copying.
 
-## Report layout (frozen order)
+## Report layout
 1. Summary line + scan date + commit + coverage + advisory data source (coverage always beside the summary)
 2. Up to three recommended next actions: what, why first, how to verify
 3. Evidence: expandable per action
@@ -458,24 +455,22 @@ wasn't checked, advisories change over time → rescan, suggest the ecosystem's 
 `npm audit`).
 Never says "secure". Partial clean is never shown as clean overall.
 
-## API (sketch)
-- `POST /scans` `{ repoUrl }` + `Idempotency-Key` → `202 { scanId }` | 200 (key replay) | 400 | 409 |
-  429 (per-client limit) | 503 (outstanding-scan cap), both with `Retry-After`
-- `GET /scans/:id` → status, stage, counts, coverage, error
-- `GET /scans/:id/report` → scan, summary, explanation, ciChecks, actions, findings, unchecked, agentPrompt
-- `GET /` → UI; `/scans/:id` route in UI is shareable
-- `GET /health/live`, `GET /health/ready`
+## API reference
 
-## Known limits (state in README)
-- Admission control (review finding): `POST /scans` has a per-client limit (fixed one-minute window, in
-  memory per API process, `SUBMIT_RATE_PER_MINUTE`, 429 + Retry-After) and an exact cap on outstanding scans
-  (`MAX_OUTSTANDING_SCANS`, checked in the submission transaction under an advisory lock, 503 + Retry-After;
-  key replays still answer). Several API instances each apply their own per-client limit.
-- Retention: the worker deletes finished scans after `SCAN_RETENTION_DAYS` (findings, unchecked deps and keys
-  cascade) and idempotency keys after `IDEMPOTENCY_KEY_TTL_HOURS`, hourly, in batches. Unfinished scans are
-  never deleted; a deleted scan's link answers 404. Worker concurrency is set per process.
-- Public github.com repos only; root `package-lock.json` only (npm is the only implemented ecosystem; the
-  seams for others are described under "Ecosystems").
-- One lockfile per scan; manifests without a lockfile (ranges, no exact versions) are not supported.
-- One advisory source (OSV.dev); findings reflect its coverage. Other sources fit the contract under
-  "Advisory source" but are not implemented.
+| Endpoint | Behavior |
+|---|---|
+| `POST /scans` | Accepts JSON with `repoUrl` and an optional `Idempotency-Key`. Returns `202` for a new scan or `200` for a replay, with `{ scanId }` and a `Location` header. Invalid input returns `400`, a conflicting key returns `409`, and rate or backlog limits return `429` or `503` with `Retry-After`. |
+| `GET /scans/:id` | Returns status, stage, counts, coverage, and error details. Browser requests for HTML open the shareable scan page. The JSON endpoint returns `404` for a missing or expired scan. |
+| `GET /scans/:id/report` | Returns scan metadata, summary, explanation, CI checks, actions, findings, unchecked dependencies, and the agent prompt once the scan is terminal. Returns `409` while unfinished and `404` for a missing or expired scan. |
+| `GET /` | Serves the web UI. |
+| `GET /health/live` | Checks that the API responds. |
+| `GET /health/ready` | Checks database access from the API. Returns `503` when the database is unavailable. |
+
+## Operations
+
+- Worker concurrency is per process. The shared backlog cap and per-instance submission limits are described
+  under [Submission](#submission). API readiness checks Postgres, so an available API can still accept jobs
+  while the worker is stopped.
+- The worker deletes finished scans after `SCAN_RETENTION_DAYS` (30 by default) and idempotency keys after
+  `IDEMPOTENCY_KEY_TTL_HOURS` (24 by default). Cleanup runs hourly in batches. Deleting a scan also deletes
+  its findings, unchecked dependencies, and associated keys. Unfinished scans are excluded.

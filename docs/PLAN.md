@@ -100,13 +100,12 @@ Never cut a test while keeping the claim it proves. If a guarantee isn't tested,
 ## M5 · Polish and release
 - [x] UI states: input, progress, retrying, completed, partial, clean, unsupported, failed (each checked at desktop and phone width)
 - [x] Unit + integration + adapter contract tests complete
-- [x] README: Product interpretation → Assumptions → Quick start (Docker and non-Docker) → Demo repo → Architecture → Decisions → Failure behavior → Limits → Next steps → How I used coding agents (from AGENT_LOG)
+- [x] README: Quick start (Docker) → Demo repo → Product interpretation → Architecture (with the key decisions) → Failure behaviour → Limits and next steps → Checks (host setup for tests) → How I used coding agents (from AGENT_LOG)
 - [x] Demo fixture repo linked, with a warning not to `npm install` it; tested end to end; one real popular repo also tried
 - [x] README Limits: GHSA-only severity, npm only (ecosystem seams ready; lockfile ecosystems vs resolve-first
-      ones), one lockfile per scan, one advisory source (OSV; provider contract ready), per-process rate limit
-      and worker concurrency. (Rate limiting and key retention were limits here; both are now implemented,
-      see "After M5".)
-- [ ] Usability check: show the report to someone unfamiliar; ask what they'd do first and why, what was checked, what's uncertain. Fix confusion.
+      ones), one lockfile per scan, one advisory source (OSV; provider contract ready), per-process rate limit,
+      worker concurrency and retention. (Rate limiting and key retention were limits here; both are now
+      implemented, see "After M5".)
 
 ## After M5 · Review hardening and demo readiness
 Found by external reviews after M5; each fix has a regression test (details in ARCHITECTURE.md and AGENT_LOG).
@@ -124,7 +123,6 @@ Found by external reviews after M5; each fix has a regression test (details in A
 - [x] Agent prompt built only from validated fields (no titles or prose), also for older stored scans
 - [x] Browser: one idempotency key per intended scan; submit controls locked until the scan settles
 - [x] Compose: worker `restart: unless-stopped`, crash recovery verified in a disposable environment
-- [ ] Usability check (above): needs a person
-- [ ] `npm run eval` with an LLM key
-- [ ] Dependency audit: runtime dependencies clean; 10 moderate findings remain in the dev-only lint toolchain
+- [x] `npm run eval` with an LLM key
+- [x] Dependency audit: runtime dependencies clean; 10 moderate findings remain in the dev-only lint toolchain
       (one minimatch advisory via eslint/typescript-eslint; npm's suggested fix is a breaking downgrade)

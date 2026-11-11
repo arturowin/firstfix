@@ -1,269 +1,92 @@
 # AI Scan Review
 
-Paste a public GitHub repository URL, follow the scan as it runs, and get a prioritized review of the npm
-dependencies: what to do first, why, how to verify it, and a prompt you can hand to a coding agent.
-Facts come from the scan; AI only explains them.
-
-- [Product interpretation](#product-interpretation)
-- [Assumptions](#assumptions)
-- [Quick start](#quick-start)
-- [Demo repo](#demo-repo)
-- [Architecture](#architecture)
-- [Decisions](#decisions)
-- [Failure behaviour](#failure-behaviour)
-- [Limits](#limits)
-- [Next steps](#next-steps)
-- [How I used coding agents](#how-i-used-coding-agents)
-
-## Product interpretation
-
-The goal is to help a repository owner turn security findings into a prioritized next step, without needing
-security expertise. How I read each part of the brief:
-
-| The brief says | What this builds |
-|---|---|
-| "connect my repo" | paste a public GitHub URL; no install, no account |
-| "code or dependencies" | npm dependencies, deliberately: every finding is verifiable against advisory data |
-| "AI-assisted" | AI writes the explanation; versions, IDs, severities and steps are rendered from data |
-| "not a raw report" | one summary line, up to three next actions, evidence one click away, everything else below |
-| "what I should do next" | actions grouped by package, ranked, with how to verify; a coding-agent handoff prompt |
-| "a product, not an API" | real UI states (progress, retrying, partial, clean, failed), shareable `/scans/:id` links |
-
-The report is honest about what it doesn't know: candidate versions are never called fixes, coverage sits
-beside the summary, a partial result never reads as clean, and nothing says "secure".
-
-## Assumptions
-
-- The reader owns the repository but isn't a security specialist; many will apply fixes through a coding agent.
-- Public github.com repositories with a root `package-lock.json` (lockfile v2/v3, npm 7+). Other repositories
-  get a clear "unsupported" with the reason.
-- The default branch's current commit is scanned; every file read is pinned to that commit's SHA.
-- Advisory data comes from [OSV.dev](https://osv.dev). Severity is GitHub's advisory label when present,
-  otherwise "unknown" (shown, never hidden).
-- "Runtime" and "dev" are the lockfile's classification. The scan doesn't see what is deployed or executed,
-  and the report says so instead of guessing exposure.
+Scaner reviews npm dependencies in public GitHub repositories. Paste a repository URL, follow the scan, and get a report that explains what to address first, why it matters, and how to verify the change.
 
 ## Quick start
 
-Requirements: Docker. For the non-Docker path, Node.js 22.18+ (`.nvmrc`; `.ts` files run directly) and
-PostgreSQL (developed and tested on 17).
+You’ll need Docker with Compose, internet access, and ports `3000` and `5432` free.
 
-### Docker
+```sh
+cp -n .env.example .env
+openssl rand -hex 24
+```
+
+Set `POSTGRES_PASSWORD` in `.env` to the generated value, then run:
 
 ```sh
 docker compose up --build
-# open http://localhost:3000
 ```
 
-Compose starts Postgres, runs migrations once, then the API (port 3000) and the worker. Optional settings go in
-your shell or a `.env` file (see `.env.example`):
+Open `http://localhost:3000`. Compose starts Postgres, runs migrations, and starts the API and worker.
 
-| Variable | Default | What it does |
-|---|---|---|
-| `GITHUB_TOKEN` | none | raises GitHub's limit from 60 to 5000 requests/hour |
-| `LLM_API_KEY` | none | enables AI-written explanations; without it a template writes them (the report is complete either way) |
-| `LLM_PROVIDER` | `anthropic` | which LLM adapter to use (only Anthropic is implemented) |
-| `LLM_MODEL` | provider default (`claude-opus-5-5`) | model for explanations |
-| `LLM_TIMEOUT_MS` | `20000` | after this, the template's text is used |
-| `WORKER_CONCURRENCY` | `2` | scans per worker process |
-| `SUBMIT_RATE_PER_MINUTE` | `10` | scans one client (IP) may request per minute; then `429` |
-| `MAX_OUTSTANDING_SCANS` | `200` | scans queued or running at once; then `503` "busy" |
-| `TRUST_PROXY` | `false` | take the client IP from `X-Forwarded-For` (only behind your own proxy) |
-| `SCAN_RETENTION_DAYS` | `30` | finished scans (and their findings) are deleted after this |
-| `IDEMPOTENCY_KEY_TTL_HOURS` | `24` | idempotency keys expire after this |
+`GITHUB_TOKEN` is optional and raises GitHub’s rate limit. `LLM_API_KEY` is optional and enables AI-written explanations. The default report uses template explanations. See [`.env.example`](.env.example) for other settings.
 
-### Without Docker
+### Try the demo
 
-```sh
-nvm use                                  # Node 22
-npm ci
-export DATABASE_URL=postgres://scan:scan@localhost:5432/scan
-docker compose up -d postgres            # or any PostgreSQL with that URL
-npm run migrate
-npm run build:web
-npm run api                              # terminal 1: http://localhost:3000
-npm run worker                           # terminal 2
-```
+Paste `https://github.com/arturowin/scan-review-demo` into Scaner. Look for the recommendation to remove `flatmap-stream`, the advisory evidence behind that recommendation, and the Git dependency the scanner couldn’t check.
 
-### Checks
+The demo repository intentionally pins vulnerable and malicious package versions. Scan it by URL and avoid installing its dependencies.
 
-```sh
-npm run typecheck && npm run lint && npm test   # tests create throwaway databases next to DATABASE_URL
-npm run eval                                    # explanation checks over fixed fixtures (AI only with LLM_API_KEY)
-```
+## Product interpretation
 
-The test suite takes about two minutes: about 35 s of it runs real crash and restart scenarios through
-pg-boss.
+The report helps a repository owner decide what to do next. It groups findings by package, leads with the highest-priority actions, and shows the evidence and verification steps for each suggestion. It also provides a prompt for handing the work to a coding agent.
 
-## Demo repo
-
-**[arturowin/scan-review-demo](https://github.com/arturowin/scan-review-demo)**: a repository that exists to
-be scanned.
-
-> ⚠️ **Do not `npm install` it.** Its lockfile pins known-vulnerable and known-malicious package versions on
-> purpose. It contains no application code.
-
-It covers each case the report has to handle:
-- a known malicious package (`flatmap-stream`);
-- direct and transitive vulnerabilities (`lodash`, `qs` via `express` and via `request`, at two versions);
-- a package with many advisories and a major-version jump (`postcss`);
-- a dev-only dependency (`minimist`);
-- no fixed version published (`request`);
-- a git dependency that can't be checked (`slash`);
-- a workspace.
-
-Scanned end to end on the live stack: 107 dependencies, 106 checked, 1 not checked (git source). It finds 1
-malicious package and 14 vulnerable ones, and starts with "remove flatmap-stream".
-
-Real repositories also tried:
-
-| Repository | Dependencies | Time | Result |
-|---|---|---|---|
-| `nestjs/nest` | 1425, all checked | 8 s | 21 packages with known vulnerabilities |
-| `npm/cli` (workspaces) | 993, all checked | 8 s | 17 packages with known vulnerabilities |
-| `microsoft/vscode` | none | 3 s | unsupported: no root `package-lock.json` |
+The scanner determines the findings, priorities, and suggested actions. AI can explain those results when configured.
 
 ## Architecture
 
+```text
+Browser ──▶ Fastify API ──▶ Postgres ◀── Scan worker ──▶ GitHub + OSV
+                           scans, findings,             └──▶ optional LLM
+                           pg-boss jobs
 ```
- browser ──HTTP──▶ API process ──┐                ┌── worker process(es) ──▶ GitHub (SHA-pinned reads)
- (static UI,       (Fastify, zod, │   PostgreSQL   │   ScanPipeline           OSV.dev (advisories)
-  polls /scans/:id) idempotency)  └─ scans, findings, pg-boss queue ─┘          LLM (optional, explanations)
-```
 
-- **Two processes, one database.** A scan row and its pg-boss job are created in one transaction (job id =
-  scan id), so a scan never exists without its job. The UI polls the scan row for progress.
-- **Pipeline** (`src/application/scan-pipeline.ts`), in order:
-  1. claim the attempt;
-  2. resolve the default branch to a SHA;
-  3. find a supported lockfile at that SHA;
-  4. parse it (dependency graph: direct parents, install paths);
-  5. look up advisories (partial coverage allowed);
-  6. pick candidate versions;
-  7. rank and group into actions;
-  8. explain;
-  9. save findings and completion in one locked, attempt-guarded transaction.
-- **Hexagonal, enforced by lint.** `domain/` is pure (no I/O), `application/` talks to `ports/` only, and
-  `adapters/` implement them: GitHub, OSV, Postgres, pg-boss, the LLM, and the template explainer. Import rules
-  live in `eslint.boundaries.js`, with tests.
-- **Seams for growth, each with a contract test suite:**
-  - **Ecosystems:** a lockfile-format registry, version schemes and remediation hints. A test-only ecosystem
-    runs through the real pipeline.
-  - **Advisory sources:** a neutral `AffectedRange`, with the provider adapter owning all translation.
-  - **LLM providers:** one adapter per provider plus a registry line; only that adapter may import its SDK.
-- More detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Milestones: [`docs/PLAN.md`](docs/PLAN.md).
+- **Queue and worker.** GitHub and OSV requests can be slow or fail temporarily. The API returns a scan ID once the job is saved, and the browser polls for progress while the worker runs. The worker limits concurrent scans. If it exits mid-scan, the job can be retried under the same scan ID once a worker is available and the queue detects the interruption.
+- **One Postgres instance.** Using pg-boss keeps the deployment small and lets the API create the scan and enqueue its job in one transaction.
+- **Explicit SQL for scan ownership.** The attempt check and completion transaction are visible in the queries. A stale worker cannot overwrite the result of a newer attempt.
+- **Commit-pinned reads.** The worker resolves the default branch to a commit and reads the lockfile at that commit. The report identifies exactly which snapshot it checked.
 
-## Decisions
-
-| Decision | Why |
-|---|---|
-| Postgres + pg-boss (same database) instead of Redis/BullMQ | one dependency to run; job creation shares the scan's transaction |
-| Explicit SQL, no ORM | the attempt guard (`WHERE id = $1 AND attempt = $2`) and the locked completion must stay visible |
-| Every scan-row write is attempt-guarded; recovery bumps the attempt | a stale or zombie worker can never overwrite a newer outcome |
-| Read files by commit SHA, never by branch | the report describes exactly one commit, even if the branch moves mid-scan |
-| Ranking: malicious › severity › runtime before dev › direct before transitive | fix availability shapes the action, not the urgency |
-| One action per package, across installed versions | that's the unit someone changes |
-| A candidate is checked against **every** advisory's ranges | advisories can affect separate version intervals; "addresses N" counts only what the version leaves |
-| npm aliases are looked up by their real name; every declaration is a required update | an alias under its folder name gives a false clean result; two aliases are two changes |
-| AI writes prose only, checked against the facts before use | no invented versions or advisory IDs, no other package's evidence, no "secure"/"fixed", no links, commands or requests to send secrets; otherwise the template |
-| AI prose stays in the report; the coding-agent prompt is template-only | an agent acts on its prompt, so model text there would be an injection path |
-| Package names from the lockfile are validated before any command is built | the lockfile is repository-controlled; a crafted name must not become shell syntax in a suggested command |
-| Actions are built when the report is read, from stored findings | findings are the stored facts; wording improvements apply to old reports |
-| Node runs `.ts` directly (type stripping) | no build step for the server; the UI is bundled with esbuild |
+See the [architecture doc](docs/ARCHITECTURE.md) for the scan pipeline, failure handling, and extension points.
 
 ## Failure behaviour
 
-Every lifecycle outcome is reachable and tested; the outcome → test map is in
-[`docs/ARCHITECTURE.md` › Lifecycle](docs/ARCHITECTURE.md#lifecycle).
+- **Temporary failures** (timeouts, 5xx, rate limits from GitHub or OSV): the scan shows `retrying` with the reason and is retried with backoff. If the last attempt also fails, the scan ends `failed` with "Retries exhausted: <reason>".
+- **Permanent failures** are recorded and not retried. A missing or private repository, or a rejected token, ends `failed`. No root `package-lock.json`, an unsupported lockfile version, invalid JSON, an empty repository or an oversized lockfile ends `unsupported` with the reason.
+- **Some advisory lookups fail:** the scan completes with partial coverage and lists the dependencies it couldn't check. A partial result is never shown as clean. If every lookup fails, the scan is retried, then fails.
+- **Worker crash mid-scan:** pg-boss notices the missed heartbeat (about 30 s) and retries the job under the same scan ID; Compose restarts the worker. A crash on the last attempt is caught by a dead-letter handler, which marks the scan `failed`. A periodic sweeper fails a scan only when its job has finished or disappeared, so a queue backlog or a stopped worker never fails a healthy scan.
+- **Stale or duplicate workers:** each attempt owns the scan through an attempt counter. Findings and completion are written in one transaction on the locked scan row, so an older attempt or a duplicate delivery changes nothing.
+- **AI explanations** that time out, fail validation or have no API key fall back to template text. They never fail a scan or change its coverage.
+- **Overload:** `POST /scans` returns 429 above the per-client rate and 503 when too many scans are outstanding. Resending with the same `Idempotency-Key` is safe.
 
-| What happens | Result |
-|---|---|
-| Repository not found, private, or token rejected | `failed` with the reason, not retried |
-| No supported lockfile, lockfile v1, invalid JSON, empty repo, lockfile over 50 MB | `unsupported` with the reason |
-| GitHub/OSV timeout, 5xx, rate limit | `retrying` (the UI shows why), retried with backoff (3 retries) |
-| Retries exhausted | `failed`: "Retries exhausted: <reason>" |
-| Some advisory lookups fail | `completed`, coverage **partial**; those packages listed as "lookup failed, scan again" |
-| Every advisory lookup fails | retried; `failed` once retries run out |
-| All dependencies from git/file/URL sources | `completed`, "No dependencies could be checked" (never "no vulnerabilities") |
-| Worker stopped or killed mid-scan | the job is retried (after the 30 s heartbeat for a hard crash) and completes |
-| Worker crashes on the last attempt | dead-lettered → `failed`, not stuck |
-| A job lost for any other reason | the sweeper (every 60 s) fails scans whose job is finished or missing; queued/active jobs are left alone |
-| LLM missing, slow, failing, refusing, or wrong | template explanation; the scan never fails because of prose |
-| Duplicate job delivery, stale attempt, zombie worker | no effect (attempt guard; completed scans are never reopened) |
+Every scan outcome and the test that covers it are listed under [Lifecycle](docs/ARCHITECTURE.md#lifecycle).
 
-## Limits
+## Limits and next steps
 
-- **Scope:**
-  - Public github.com repositories only (next: a GitHub App for private repos).
-  - npm only: one root `package-lock.json`, lockfileVersion 2 or 3. The ecosystem seams are ready for
-    ecosystems that have lockfiles (Cargo.lock, poetry.lock/uv.lock, Gemfile.lock, composer.lock). Manifests
-    with ranges and no lockfile (plain `requirements.txt`, `pom.xml`) need dependency resolution first, which
-    is a different problem.
-  - One lockfile per scan: npm and Python in one repository would need per-lockfile coverage.
-  - Not a SAST, secrets or reachability scanner.
-- **Data:**
-  - One advisory source (OSV.dev); findings reflect its coverage. The provider contract is ready for others
-    but none is implemented.
-  - Severity is GitHub's label only; there's no CVSS parsing, so records without a label show "unknown".
-  - Candidate versions come from advisory data; compatibility and resolution aren't checked. Only a rescan
-    confirms.
-- **AI text:** it's checked for invented identifiers and versions, overlong text and banned claims, but the
-  truth of its prose can't be validated. That's why it's labelled and facts never come from it.
-- **Operations:**
-  - The per-client limit on `POST /scans` is kept in memory per API process; with several API instances
-    each applies its own. Behind a proxy, set `TRUST_PROXY` or every client shares one address.
-  - Worker concurrency is set per process (`WORKER_CONCURRENCY`); the outstanding-scan cap bounds the queue.
-  - Finished scans are deleted after 30 days by default, so old shareable links stop working.
-  - GitHub without a token allows 60 requests/hour per IP; each scan uses 2 API calls plus raw file reads.
+- **Scope:** one root npm `package-lock.json` (v2 or v3) per scan, read from the default branch of a public github.com repository. Dependency advisories only: no source-code analysis, secrets or reachability.
+- **Ecosystems:** npm only. Lockfile parsing, version rules and upgrade commands are registered per ecosystem, so other lockfile ecosystems (Cargo, Poetry, Bundler, Composer) fit the same seams. Manifests without exact versions, such as a plain `requirements.txt` or Maven `pom.xml`, would need dependency resolution first.
+- **Advisory data:** OSV.dev only, behind a provider-neutral contract. Findings reflect its coverage. Severity uses GitHub's advisory label; advisories without one show `unknown` (no CVSS scoring yet).
+- **Not checked:** Git, local and non-registry tarball dependencies are listed as unchecked.
+- **Candidate versions** come from advisory data and are never claimed as fixes. After applying a suggested upgrade, run the project's tests for compatibility and rescan the resulting lockfile to see whether the advisories still match.
+- **Operations:** the `POST /scans` rate limit keeps its counters in memory, so each API instance applies its own limit. Each worker runs 2 scans at a time (`WORKER_CONCURRENCY`). Finished scans are deleted after 30 days and idempotency keys after 24 hours (configurable, see [`.env.example`](.env.example)).
+- **Next steps:** support more lockfile formats, and add a dedicated SAST worker for source-code analysis alongside dependency scans.
 
-## Next steps
+## Checks
 
-1. Private repositories through a GitHub App (installation tokens, the same SHA-pinned reads).
-2. More lockfile formats on the existing seams: `yarn.lock` and `pnpm-lock.yaml` for npm first, then
-   `poetry.lock` / `uv.lock`.
-3. CVSS-based severity when the label is missing; a second advisory source behind the same contract.
-4. Rescan diffs ("2 fixed, 1 new since last scan"), so the loop of upgrade → rescan → confirm is visible.
-5. Shared rate limiting across API instances (in Postgres or at the proxy), and per-repository dedup of
-   identical in-flight scans.
-6. Reachability hints for the top action (is the vulnerable function imported?), labelled as heuristics.
+Use Node.js 22.18+ and run `npm ci`. For the full test suite, set `DATABASE_URL` to a reachable PostgreSQL instance using a role that can create temporary databases.
+
+```sh
+npm run typecheck
+npm run lint
+npm test
+npm run eval
+```
+
+The eval checks explanations against fixed fixtures. Export `LLM_API_KEY` in the shell to also evaluate the live model.
 
 ## How I used coding agents
 
-I built this with Claude Code as a pair. I made the product and design calls; the agent wrote most of the code
-under a written plan and rules (`CLAUDE.md`, `docs/PLAN.md`), one milestone at a time. External reviews
-checked each milestone. The raw log is [`docs/AGENT_LOG.md`](docs/AGENT_LOG.md); this is the summary.
+I brainstormed with two AI models to explore different approaches. I made the final product and technical decisions, documented the architecture, and broke the work into milestones. I used Claude Code to implement most of the code one milestone at a time.
 
-**How the work was set up**
-- **Plan before code.** Each milestone started with the agent listing the files, tests and open decisions,
-  and coding only after I approved. Decisions that were mine stayed mine: workspace dependencies count as
-  direct, what a major jump means on 0.x, building actions when the report is read, switchable LLM providers,
-  partial coverage instead of retrying.
-- **Verify, don't assume.** Before any queue or OSV code existed, the agent wrote contract tests against the
-  installed pg-boss version and saved real OSV responses as fixtures. That surfaced facts the docs had wrong:
-  pg-boss 12, not 10; no archive table; heartbeat-based crash detection.
-- **One commit per green step**, with typecheck, lint and tests run before each.
+I also used AI to review the implementation and surface subtle issues. I verified the work with type checks, linting, tests, and independent reviews.
 
-**What the reviews and I caught**, with each fix a test:
-- The parser named npm aliases by their install folder, so `my-lodash` was looked up instead of `lodash`.
-  That could have produced a false clean result.
-- The candidate logic called a version "addresses both advisories" when it sat inside a second vulnerable
-  interval of one of them.
-- Two aliases were offered as alternatives ("A or B") when both needed updating, and "candidate or later"
-  promised more than was checked.
-- The fallback text could fail the scan it was meant to protect: a package named `safe-buffer` tripped the
-  "safe" check.
-- The explanation check pooled every package's evidence, so one package's text could quote another's.
-- Wording claimed deployment facts the scan can't see ("ships with the application").
-- The sweeper could circle the same 100 healthy scans forever, missing a lost one behind them.
-- Malformed advisory data could reject a whole lookup instead of one package.
-- Unchecked packages were all labelled "non-registry source", even when the lookup had only failed.
-
-**Where the agent was wrong or I overruled it**
-- It committed one step with lint errors (its command chain didn't stop on them); it fixed and amended the
-  commit before moving on.
-- Its first lockfile picked up an internal company registry from my machine's npm config. Caught before any
-  push, it was regenerated against the public registry, and `.npmrc` now pins it.
-- It proposed `tsx`; I chose running `.ts` directly on Node 22.
-
-**What I'd keep doing:** contract tests for every external system before relying on it, failure tests
-through the real queue rather than mocks, and a reviewer reading each milestone with fresh eyes.
+The [architecture](docs/ARCHITECTURE.md), [implementation plan](docs/PLAN.md), and [agent log](docs/AGENT_LOG.md) have more detail.

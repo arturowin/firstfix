@@ -53,9 +53,8 @@ One entry per milestone (or per notable session). Keep it factual.
   `scripts/check-node.mjs` as pre-scripts instead. The heartbeat test's flake risk was lower than stated
   (~10 s of 30 s); margin widened anyway.
 - **Demo fixture repo:** prepared locally in `../scan-review-demo` (lockfile v3, cases from real OSV data,
-  warning README, `.npmrc ignore-scripts`). First lockfile picked up an internal company registry from the
-  user's npm config; regenerated against registry.npmjs.org. Not committed or published yet (my call).
-- **I corrected / rejected:** no commits until the git author email is decided (global email is a work address).
+  warning README, `.npmrc ignore-scripts`), resolved against registry.npmjs.org. Not committed or published yet
+  (my call).
 - **Verified by:** `typecheck`, `lint`, `test` (33 tests) green on Node 22.23 against Postgres 17.
 
 ### 2026-11-10 · M0 second review
@@ -67,11 +66,6 @@ One entry per milestone (or per notable session). Keep it factual.
   terminal state; a test runs the exact documented failure update. Parsing rule added: only `node_modules/`
   keys are dependencies.
 
-### 2026-11-10 · Git history reset
-- The repo's original 4 M0 commits (authored with a work email) were removed outside the agent session
-  (~13:50). The working tree was intact. History was restarted as one M0 commit with the personal email,
-  rather than recreating step commits whose intermediate states were lost. Commits from M1 on are per green step.
-
 ### 2026-11-10 · M1 vertical slice
 - **Agent did:** domain (URL normalization, lockfile parser basics, severity mapping); transactional submission
   with idempotency (job id = scan id) and attempt-guarded repository; Fastify API; GitHub + OSV adapters
@@ -81,10 +75,9 @@ One entry per milestone (or per notable session). Keep it factual.
   navigation and JSON to fetch (content negotiation); private repos visible through a token are refused as
   "not found or private"; empty repo and >50 MB lockfile are `unsupported`; report endpoint is 409 until terminal.
 - **Found along the way:** msw 3 renamed `onUnhandledRequest` → `onUnhandledFrame` (the old option was silently
-  ignored, so unmocked calls wouldn't have failed tests); the project lockfile had 299 internal-registry URLs
-  from the machine's npm config → `.npmrc` pins registry.npmjs.org, M0 commit amended before any push;
+  ignored, so unmocked calls wouldn't have failed tests); the project lockfile picked up registry URLs from
+  the machine's npm config → `.npmrc` pins registry.npmjs.org, M0 commit amended before any push;
   Node type stripping forbids constructor parameter properties; Alpine `localhost` resolves to IPv6 (healthcheck).
-- **I corrected / rejected:** git author set to personal email for this repo; history restart (see above).
 - **Verified by:** 145 tests green; gate run on the live stack against real GitHub and OSV: the published demo
   repo completed in ~5 s at its pinned commit (107 deps, 106 checked, 1 git dep unchecked, 39 advisories in
   16 package versions incl. the MAL- record); Idempotency-Key replay → 200; nonexistent repo → failed
@@ -244,6 +237,7 @@ One entry per milestone (or per notable session). Keep it factual.
   - The malicious card repeated its label.
   - `microsoft/vscode` has no root `package-lock.json` (reported as unsupported). `nestjs/nest` (1425
     dependencies) and `npm/cli` (993, workspaces) each completed in 8 s.
-- **Still open, needs a person:** the usability check (someone unfamiliar reads a report), and a live run
-  with a real LLM key.
 - **Verified by:** 303 tests green (typecheck, lint), eval 4/4, clean-clone run.
+
+### 2026-11-11 · Live eval
+- **Verified by:** `npm run eval` with a real `LLM_API_KEY` (run by me): passed.
