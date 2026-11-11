@@ -1,9 +1,9 @@
 import pg from 'pg';
-import { DEFAULT_URL } from './db.ts';
+import { testDatabaseUrl } from './db.ts';
 
 /** Integration and contract tests need Postgres; fail once, clearly, instead of in every file. */
 export default async function setup(): Promise<void> {
-  const url = process.env['DATABASE_URL'] ?? DEFAULT_URL;
+  const url = testDatabaseUrl();
   const client = new pg.Client({ connectionString: url, connectionTimeoutMillis: 3000 });
   try {
     await client.connect();

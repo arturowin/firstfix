@@ -6,11 +6,15 @@ export interface TestDatabase {
   drop: () => Promise<void>;
 }
 
-export const DEFAULT_URL = 'postgres://scan:scan@localhost:5432/scan';
+export function testDatabaseUrl(): string {
+  const url = process.env['DATABASE_URL'];
+  if (!url) throw new Error('Set DATABASE_URL to a local PostgreSQL instance before running integration tests.');
+  return url;
+}
 
 /** Creates a throwaway database next to DATABASE_URL so tests never touch real data. */
 export async function createTestDatabase(): Promise<TestDatabase> {
-  const base = new URL(process.env['DATABASE_URL'] ?? DEFAULT_URL);
+  const base = new URL(testDatabaseUrl());
   const name = `test_${randomUUID().replaceAll('-', '')}`;
 
   const admin = new pg.Client({ connectionString: base.toString() });
