@@ -298,16 +298,16 @@ function renderMessage(text: string): void {
 }
 
 const STAGES: { stage: NonNullable<ScanJson['stage']>; label: string }[] = [
-  { stage: 'fetching', label: 'Fetch lockfile' },
-  { stage: 'scanning', label: 'Check advisories' },
-  { stage: 'analyzing', label: 'Rank and explain' },
+  { stage: 'fetching', label: 'Read dependencies' },
+  { stage: 'scanning', label: 'Check for known vulnerabilities' },
+  { stage: 'analyzing', label: 'Prioritize findings' },
 ];
 
 /** Queued → fetch → check → rank, with the current step highlighted. */
 function stepsBar(scan: ScanJson): HTMLElement {
   const bar = el('ol', undefined, 'steps-bar');
   const current = scan.status === 'running' && scan.stage ? STAGES.findIndex((s) => s.stage === scan.stage) : -1;
-  bar.append(el('li', 'Queued', scan.status === 'queued' ? 'active' : 'done'));
+  bar.append(el('li', 'Waiting to start', scan.status === 'queued' ? 'active' : 'done'));
   STAGES.forEach((s, i) => {
     bar.append(el('li', s.label, i < current ? 'done' : i === current ? 'active' : ''));
   });
@@ -326,7 +326,7 @@ function renderProgress(scan: ScanJson): void {
           ? 'Fetching the lockfile…'
           : scan.stage === 'scanning'
             ? `Checking ${String(c.totalDeps - c.unsupportedDeps)} dependencies against advisory data…`
-            : 'Preparing results…';
+            : 'Preparing your report…';
   const status = el('div', undefined, scan.status === 'retrying' ? 'error' : 'muted');
   status.append(el('span', undefined, 'spinner'), line);
   box.append(repoTitle(scan), stepsBar(scan), status);
