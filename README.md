@@ -54,7 +54,7 @@ The demo repository intentionally pins vulnerable and malicious package versions
 
 ## Product interpretation
 
-The report helps teams prioritize security work and hand clear next actions to repository maintainers. It groups dependency findings by package and source findings by rule, with supporting evidence and remediation guidance. A copyable coding-agent prompt supports dependency remediation.
+The report helps teams prioritize security work and hand clear next actions to repository maintainers. It groups dependency findings by package and source findings by rule, with supporting evidence and remediation guidance. A copyable coding-agent prompt covers both: dependency changes to verify, and source locations to review.
 
 The scanner determines the findings, priorities, and suggested actions. AI can explain those results when configured.
 

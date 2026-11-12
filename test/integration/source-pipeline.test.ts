@@ -107,6 +107,10 @@ describe('source checks in the scan pipeline', () => {
       testFile: false,
       title: 'TLS certificate verification disabled for the whole process',
     });
+    // One handoff for both checks: the package upgrade and the source locations, never the matched code.
+    expect(r.agentPrompt).toContain('## Candidate changes (verify each one)');
+    expect(r.agentPrompt).toContain('1. FF-TLS-001 (high): TLS certificate verification disabled for the whole process\n   - src/flagged.ts, line 5');
+    expect(r.agentPrompt).not.toContain("= '0'");
   });
 
   it('b. no lockfile, source checks succeed: completed, and the report says why dependencies weren’t checked', async () => {
@@ -117,7 +121,10 @@ describe('source checks in the scan pipeline', () => {
     expect(r.dependencyNotChecked).toMatchObject({ status: 'unsupported', message: expect.stringMatching(/package-lock\.json/) as unknown });
     expect(r.summary).toBeNull();
     expect(r.actions).toEqual([]);
-    expect(r.agentPrompt).toBeNull();
+    // The handoff covers the source findings alone: no dependency wording, every location labelled as a test file.
+    expect(r.agentPrompt).toContain('## Source findings (confirm each one)');
+    expect(r.agentPrompt).toContain('   - test/flagged.ts, line 5 (test file)');
+    expect(r.agentPrompt).not.toMatch(/dependency|advisor/i);
     expect(r.source?.findings).toHaveLength(3);
     expect(r.source?.findings.every((f) => f.testFile)).toBe(true); // in test code: labelled, still reported
   });

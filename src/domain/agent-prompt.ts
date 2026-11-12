@@ -6,10 +6,23 @@
  * severities, scopes, the repository URL, commit and lockfile path against fixed formats. Free-form text
  * (advisory titles, AI or template prose) is never included. Anything that fails validation is left out and the
  * prompt says so, which also covers rows stored before validation existed.
+ *
+ * Source findings follow the same rule: the rule id and its fixed catalog text, a validated path and line, and
+ * the test-file label. The matched excerpt is repository code, so it is never included; the agent reads the file.
  */
 import type { Severity } from './advisory.ts';
 import type { RemediationHints, VersionScheme } from './ecosystems/types.ts';
 import type { Action, ActionVersion } from './fix-plan.ts';
+import { bySourcePriority, isTestPath } from './source-files.ts';
+import { SOURCE_RULES, sourceRule } from './source-rules.ts';
+
+/** A stored source-check match, as the prompt needs it. */
+export interface PromptSourceFinding {
+  ruleId: string;
+  ruleVersion: number;
+  path: string;
+  start: { line: number; column: number };
+}
 
 export interface PromptInput {
   repoUrl: string;
@@ -21,10 +34,16 @@ export interface PromptInput {
   hintsFor: (ecosystem: string) => RemediationHints | null;
   /** The ecosystem's version scheme, for validating versions; null → a conservative token check. */
   schemeFor?: (ecosystem: string) => VersionScheme | null;
+  /** Source-check matches stored for this scan (at most the stored examples). */
+  sourceFindings?: readonly PromptSourceFinding[];
+  /** Every source match found, when more were found than stored. */
+  sourceMatches?: number;
 }
 
 /** Large plans are cut here; the prompt says how many were left out. */
 export const PROMPT_MAX_ACTIONS = 20;
+/** Source locations listed; the prompt says how many more are in the report. */
+export const PROMPT_MAX_SOURCE_LOCATIONS = 20;
 
 const SEVERITIES: readonly Severity[] = ['critical', 'high', 'medium', 'low', 'unknown'];
 const SCOPES = ['runtime', 'optional', 'dev'];
@@ -125,8 +144,56 @@ function changeLines(a: Action, v: ActionVersion, hints: RemediationHints, check
   return out;
 }
 
+/**
+ * The source findings section: one entry per matched rule, most severe first, with validated locations (code
+ * outside tests first) and the rule's fixed next action. Findings for a rule this code doesn't know are counted,
+ * not listed.
+ */
+function sourceSection(input: PromptInput): string[] {
+  const all = input.sourceFindings ?? [];
+  const known = all.flatMap((f) => {
+    const rule = sourceRule(f.ruleId, f.ruleVersion);
+    return rule ? [{ f, rule }] : [];
+  });
+  const unknown = all.length - known.length;
+  const sorted = [...known].sort((x, y) => bySourcePriority({ ...x.f, severity: x.rule.severity }, { ...y.f, severity: y.rule.severity }));
+  const shown = sorted.slice(0, PROMPT_MAX_SOURCE_LOCATIONS);
+  // Two different "more"s: locations the report lists but this prompt doesn't, and matches that were only
+  // counted (past the stored-examples limit), which have no location anywhere.
+  const moreInReport = known.length - shown.length;
+  const notStored = Math.max(0, (input.sourceMatches ?? 0) - all.length);
+
+  const lines: string[] = [];
+  let n = 0;
+  for (const rule of SOURCE_RULES) {
+    const mine = shown.filter((s) => s.rule.id === rule.id);
+    if (mine.length === 0) continue;
+    n++;
+    lines.push(`${String(n)}. ${rule.id} (${rule.severity}): ${rule.title}`);
+    for (const { f } of mine) {
+      const path = SAFE_PATH.test(f.path) ? f.path : '[path omitted: failed validation]';
+      const line = Number.isInteger(f.start.line) && f.start.line > 0 ? `line ${String(f.start.line)}` : '[line omitted: failed validation]';
+      lines.push(`   - ${path}, ${line}${isTestPath(f.path) ? ' (test file)' : ''}`);
+    }
+    lines.push(`   - Change: ${rule.nextAction}`);
+  }
+  if (moreInReport > 0 || notStored > 0) lines.push('');
+  if (moreInReport > 0) {
+    lines.push(`${String(moreInReport)} more source ${moreInReport === 1 ? 'location is' : 'locations are'} in the full report; handle the ones above first.`);
+  }
+  if (notStored > 0) {
+    lines.push(
+      `${String(notStored)} more source ${notStored === 1 ? 'match was' : 'matches were'} counted but not stored, so no report lists ${notStored === 1 ? 'its location' : 'their locations'}; rescan after these changes to find ${notStored === 1 ? 'it' : 'them'}.`,
+    );
+  }
+  if (unknown > 0) {
+    lines.push('', `${String(unknown)} source ${unknown === 1 ? 'finding is' : 'findings are'} left out because ${unknown === 1 ? 'its rule is' : 'their rules are'} not known to this version; see the report.`);
+  }
+  return lines;
+}
+
 export function buildAgentPrompt(input: PromptInput): string | null {
-  if (input.actions.length === 0) return null;
+  if (input.actions.length === 0 && (input.sourceFindings ?? []).length === 0) return null;
   const header = {
     repo: REPO_URL.test(input.repoUrl) ? input.repoUrl : 'this repository',
     commit: SHA.test(input.commitSha) ? input.commitSha : 'the scanned commit',
@@ -158,33 +225,61 @@ export function buildAgentPrompt(input: PromptInput): string | null {
     ]),
   ]);
 
+  const deps = input.actions.length > 0;
+  const source = sourceSection(input);
+  const hasSource = source.length > 0;
+
   const lines = [
     `You are working in ${header.repo} at commit ${header.commit}.`,
-    `A dependency scan of ${header.lockfile} (advisory data: ${header.source}, ${header.date}) found the issues below.`,
-    'Candidate versions come from advisory data. They are not confirmed fixes: compatibility, resolution and tests are still to verify.',
-    '',
-    '## Facts from the scan',
-    ...facts,
-    '',
-    '## Candidate changes (verify each one)',
-    ...changes,
-    ...(hidden > 0 ? ['', `${String(hidden)} more ${hidden === 1 ? 'package is' : 'packages are'} in the full report; handle the ones above first.`] : []),
-    ...(unsafe > 0
-      ? ['', `${String(unsafe)} ${unsafe === 1 ? 'package is' : 'packages are'} left out because ${unsafe === 1 ? 'its name' : 'their names'} failed validation; see the report.`]
-      : []),
-    '',
-    '## How to work',
-    `- Inspect the dependency graph first${anyHints ? ` (e.g. \`${anyHints.inspectTemplate}\`)` : ''} to see what pulls each package in.`,
-    '- Change only what is listed here. Keep unrelated changes out of this work.',
-    ...(anyHints
+    ...(deps
       ? [
-          `- For a direct dependency, use \`${anyHints.upgradeTemplate}\`. For a transitive one, upgrade the direct dependency that pulls it in; if that is not possible, use ${anyHints.transitiveFix}.`,
+          `A dependency scan of ${header.lockfile} (advisory data: ${header.source}, ${header.date}) found the issues below.`,
+          'Candidate versions come from advisory data. They are not confirmed fixes: compatibility, resolution and tests are still to verify.',
         ]
       : []),
-    '- If a candidate is a major-version jump, stop and report before making that change.',
-    '- Known malicious packages: remove them, do not upgrade them, and list the secrets that may have been exposed.',
+    ...(hasSource
+      ? ['Targeted source checks found the code below. They match text: confirm each location in context before changing it.']
+      : []),
+    ...(deps
+      ? [
+          '',
+          '## Facts from the scan',
+          ...facts,
+          '',
+          '## Candidate changes (verify each one)',
+          ...changes,
+          ...(hidden > 0 ? ['', `${String(hidden)} more ${hidden === 1 ? 'package is' : 'packages are'} in the full report; handle the ones above first.`] : []),
+          ...(unsafe > 0
+            ? ['', `${String(unsafe)} ${unsafe === 1 ? 'package is' : 'packages are'} left out because ${unsafe === 1 ? 'its name' : 'their names'} failed validation; see the report.`]
+            : []),
+        ]
+      : []),
+    ...(hasSource ? ['', '## Source findings (confirm each one)', ...source] : []),
+    '',
+    '## How to work',
+    ...(deps
+      ? [
+          `- Inspect the dependency graph first${anyHints ? ` (e.g. \`${anyHints.inspectTemplate}\`)` : ''} to see what pulls each package in.`,
+          '- Change only what is listed here. Keep unrelated changes out of this work.',
+          ...(anyHints
+            ? [
+                `- For a direct dependency, use \`${anyHints.upgradeTemplate}\`. For a transitive one, upgrade the direct dependency that pulls it in; if that is not possible, use ${anyHints.transitiveFix}.`,
+              ]
+            : []),
+          '- If a candidate is a major-version jump, stop and report before making that change.',
+          '- Known malicious packages: remove them, do not upgrade them, and list the secrets that may have been exposed.',
+        ]
+      : ['- Change only what is listed here. Keep unrelated changes out of this work.']),
+    ...(hasSource
+      ? [
+          '- For source findings, open each location first. Keep certificate verification on: if a server uses a private or self-signed certificate, trust its CA instead of turning verification off.',
+          '- In test files, keep the change inside the tests and make sure the setting cannot reach application code.',
+        ]
+      : []),
     '- Run the test suite after the changes.',
-    '- Rescan the repository afterwards. Report what is still unresolved, including advisories with no fixed version published.',
+    deps
+      ? '- Rescan the repository afterwards. Report what is still unresolved, including advisories with no fixed version published.'
+      : '- Rescan the repository afterwards. Report what is still unresolved.',
   ];
   return lines.join('\n');
 }
