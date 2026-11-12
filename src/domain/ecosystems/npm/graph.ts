@@ -4,7 +4,9 @@
  * - Project declarations: the root ("") and every workspace folder (a key without `node_modules/`). Their
  *   dependencies, devDependencies and optionalDependencies are direct.
  * - Installed packages depend on their dependencies, optionalDependencies and peerDependencies (npm 7+
- *   installs peers). Their devDependencies are not installed.
+ *   installs peers). Their devDependencies are not installed. A peer that resolves to one of the project's own
+ *   direct dependencies is provided by the project, not pulled in by the package that names it, so that edge
+ *   is not followed (e.g. @eslint/js's peer eslint must not make @eslint/js a parent of eslint's dependencies).
  * - A name resolves the way Node does: `<dir>/node_modules/<name>` from the requiring package's folder
  *   upwards to the root. A `link: true` entry points at its `resolved` folder; links into the project's own
  *   workspace folders are project code (their dependencies are declarations of their own), so they end a walk.
@@ -14,7 +16,8 @@ import { workspaceMatcher } from './workspaces.ts';
 
 const NODE_MODULES = 'node_modules/';
 const PROJECT_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies'];
-const INSTALLED_FIELDS = ['dependencies', 'optionalDependencies', 'peerDependencies'];
+const INSTALLED_FIELDS = ['dependencies', 'optionalDependencies'];
+const PEER_FIELDS = ['peerDependencies'];
 
 export interface Reach {
   /** Names of the direct dependencies that pull this location in (itself excluded). */
@@ -125,6 +128,10 @@ export function buildInstallGraph(
         const next = resolve(at, name);
         return next === null ? [] : [next];
       });
+      for (const name of depNames(packages[at], PEER_FIELDS)) {
+        const next = resolve(at, name);
+        if (next !== null && !direct.has(next)) out.push(next);
+      }
       edges.set(at, out);
     }
     return out;

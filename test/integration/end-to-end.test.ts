@@ -30,7 +30,11 @@ const OSV_IDS: Record<string, string[]> = {
 
 const server = setupServer(
   http.get('https://api.github.com/repos/demo/scan-review-demo', () => HttpResponse.json({ default_branch: 'main' })),
-  http.get('https://api.github.com/repos/demo/scan-review-demo/commits/main', () => HttpResponse.json({ sha: SHA })),
+  http.get('https://api.github.com/repos/demo/scan-review-demo/commits/main', () => HttpResponse.json({ sha: SHA, commit: { tree: { sha: 'e'.repeat(40) } } })),
+  // The demo repository has no JavaScript/TypeScript source files of its own.
+  http.get('https://api.github.com/repos/demo/scan-review-demo/git/trees/:tree', () =>
+    HttpResponse.json({ tree: [{ path: 'package-lock.json', type: 'blob', mode: '100644', size: 42059, sha: 'a'.repeat(40) }], truncated: false }),
+  ),
   http.get(`https://raw.githubusercontent.com/demo/scan-review-demo/${SHA}/package-lock.json`, () =>
     HttpResponse.text(demoLock),
   ),

@@ -331,3 +331,107 @@ One entry per milestone (or per notable session). Keep it factual.
 - **Still required before M6 is complete:**
   - a private scan of an **organization** repository;
   - a second GitHub account without access getting `404` for that scan's status and report.
+
+### 2026-11-12 · M7 JavaScript/TypeScript source checks
+- **Human decided:**
+  - two targeted checks for disabled TLS verification (`FF-TLS-001`, `FF-TLS-002`) in the existing worker and
+    job, sequential after the dependency check, on one commit;
+  - no new worker, queue, service, scanner or parsing library;
+  - the six proposed defaults: test code labelled, not excluded; the member-assignment form in scope;
+    high/medium severity; the status table; path order; AI unchanged.
+  - M6 stays staged for its own commit: M7 edits are left unstaged.
+- **Agent did:**
+  - A pure tokenizer and rule matcher (`domain/source-scan.ts`), the rule catalog and summary text
+    (`source-rules.ts`), and file selection (`source-files.ts`).
+  - `application/source-check.ts`: 8 fetches at a time, a 60-second budget, cancellation checked per file, and
+    shared failures propagated.
+  - `RepoSource.listTree`/`readSourceFile` and the tree SHA from the commit response.
+  - Migration 012: per-check outcomes, `source_findings`, stage `source`, and a relaxed `completed_has_coverage`.
+  - The pipeline: a missing lockfile is now the dependency check's outcome, not the scan's.
+  - Report, API and UI source section; README, `.env.example` and Compose limits.
+- **Verified live (by the agent, local stack, public repository, no credentials for file reads):**
+  - `GET …/commits/{branch}` returns `commit.tree.sha`, and the recursive trees API returns `mode`/`type`/`size`
+    and `truncated` (checked on `arturowin/scan-review-demo`).
+  - A scan of `sindresorhus/got` (no `package-lock.json`) completed on its source checks (case b): 96 of 96
+    files read, 0 fetch failures, real `FF-TLS-002` matches with exact locations, test files labelled, and
+    links pinned to the commit.
+- **Found along the way:**
+  - That live scan showed the per-file match cap (50) making a fully checked repository read "Partial". Matches
+    over the cap no longer make coverage partial; the summary says more were found than are shown.
+  - Restored a semantic from before M7: when neither check is usable on the last attempt, the transient error
+    is rethrown after recording, so the queue records the job as failed.
+  - A cancellation test hung when the job was cancelled before the first read. The check now looks for
+    cancellation before each file.
+- **Verified by:**
+  - Typecheck, lint, 685 tests, eval 4/4.
+  - Mocked: GitHub through msw (tree and file reads, public/private credentials, revocation) and fake ports for
+    pipeline cases a–f, stale attempts, retention, older scans and private-report access to source excerpts.
+  - Undoing "missing lockfile doesn't stop source checks" fails 3 tests.
+- **Not verified live:** a private organization-repository scan. Needed: sign in, pick a private `devslaw`
+  repository with `.js`/`.ts` files, scan it, and check the source section. That scan reads the private files
+  through the contents API with the installation token.
+
+### 2026-11-12 · M7 follow-up after first use
+- **Human found** on `arturowin/typescript-node.js-rest-example` (lockfileVersion 1):
+  - the report led with "Dependencies were not checked", so the scan looked stopped, although the source check had
+    run (12 of 12 files);
+  - "Prioritize findings" ran before "Check source code";
+  - source issues weren't explained.
+- **Agent did:**
+  - The top card now leads with the source result and shows both checks side by side.
+  - Stage `analyzing` now runs after the source check, so prioritizing and explaining see both checks.
+  - Explanations cover source rules: summary paragraph plus a per-rule "why it matters", template or AI.
+    - The AI gets rule IDs, titles, severity and counts, never paths or excerpts.
+    - `checkExplanation` requires one entry per matched rule, with the same bans.
+    - `sourceRules` is optional in the LLM schema, so dependency-only replies stay valid.
+  - Source findings are grouped by rule in the UI (the same text was repeated 86 times on `sindresorhus/got`).
+  - Two eval fixtures with source facts.
+- **Verified by:**
+  - Typecheck, lint, 704 tests, template eval 6/6.
+  - Live on the local stack: the rescan shows the new top card; `got` showed the stages
+    `fetching → source → analyzing` and template explanations ("83 of 86 matches are in test files").
+- **Not verified:** the AI explanations. The eval with `LLM_API_KEY` was rejected by Anthropic: the credit
+  balance is too low. Scans fall back to the template by design.
+
+### 2026-11-12 · M7 review fixes
+- **Human (review) found, both reproduced here first:**
+  - A file with 50 `rejectUnauthorized: false` matches followed by a process-wide
+    `NODE_TLS_REJECT_UNAUTHORIZED = '0'` lost the high-severity finding: only the first 50 matches per file were
+    kept. The scan-wide cap also kept findings in fetch order.
+  - About 15 KB of nested templates threw `RangeError: Maximum call stack size exceeded` in the tokenizer, which
+    could fail the whole job and lose dependency results.
+- **Agent did:**
+  - Detection now counts every match per rule (`source_counts.rules`). Stored examples (500) are chosen by
+    priority: severity, then non-test code, then path, line and column, independent of fetch order. The summary,
+    report, explanations and UI use the counts ("31 findings (1 high, 30 medium) … more than are shown"; "30
+    matches (4 shown)").
+  - Template nesting is bounded at 64. A deeper file is `unparsed` and counted as `skippedParse` (partial coverage).
+  - The source check also catches any scanner error per file, so the job and its dependency results are never
+    lost.
+- **Verified by:**
+  - Typecheck, lint, the full suite including Postgres, template eval.
+  - Regression tests: high severity kept after 50 medium; order-independence across fetch orders; nested input
+    unparsed, not thrown; an unparsable file next to a lockfile still completes with dependency findings.
+  - Undoing the nesting bound fails 1 test; undoing the priority sort fails 3.
+- **Still open:** the live private organization-repository scan (needs a human with access).
+
+### 2026-11-12 · Action card review (minimatch under eslint)
+- **Human asked** to check a real card on this repository: upgrade minimatch 10.2.6 → 11.0.1 (GHSA-g3hv-75wg-m249).
+- **Checked against the data:**
+  - The candidate and the major-jump flag are correct (OSV: affected from 7.0.0, fixed only in 11.0.1).
+  - The AI text matches the advisory.
+- **Agent fixed:**
+  - **@eslint/js listed as a parent.** It has no dependencies; its *peer* eslint was followed as an edge.
+    `graph.ts` now skips a peer edge when the peer resolves to one of the project's own direct dependencies;
+    peers npm auto-installed for a package still count.
+  - **Verify said "shows only the candidate version".** That's wrong when other versions legitimately remain;
+    it now says "no longer shows 10.2.6".
+  - **Transitive major jump with the override route.** The step now warns that forcing a new major can break the
+    packages that depend on it. The lockfile shows eslint, @eslint/config-array and typescript-estree all
+    require `^10.x`; npm shows their latest releases do too.
+  - **"1 advisory records"** plural fixed.
+- **Verified by:**
+  - Typecheck, lint, 719 tests, template eval.
+  - Undoing the peer rule fails its test.
+  - A live rescan of this repository shows the corrected card (AI text included: the Anthropic credit works
+    again).

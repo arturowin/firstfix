@@ -4,6 +4,7 @@ import { PostgresScanRepository } from '../../src/adapters/postgres/scan-reposit
 import { purgeExpired } from '../../src/application/retention.ts';
 import type { Completion } from '../../src/ports/scan-repository.ts';
 import { createTestEnv, type TestEnv } from '../support/env.ts';
+import { DEPENDENCIES_ONLY } from '../support/checks.ts';
 
 describe('PostgresScanRepository: attempt ownership', () => {
   let env: TestEnv;
@@ -33,6 +34,7 @@ describe('PostgresScanRepository: attempt ownership', () => {
     explanation: null,
     counts: { totalDeps: 3, checkedDeps: 2, unsupportedDeps: 1, failedLookups: 0 },
     coverage: 'full',
+    ...DEPENDENCIES_ONLY,
     findings: [
       {
         ecosystem: 'npm',

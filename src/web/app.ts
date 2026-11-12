@@ -18,7 +18,7 @@ interface ScanJson {
   lockfilePath: string | null;
   advisorySource: string | null;
   status: 'queued' | 'running' | 'retrying' | 'completed' | 'unsupported' | 'failed';
-  stage: 'fetching' | 'scanning' | 'analyzing' | null;
+  stage: 'fetching' | 'scanning' | 'analyzing' | 'source' | null;
   counts: { totalDeps: number; checkedDeps: number; unsupportedDeps: number; failedLookups: number };
   coverage: 'full' | 'partial' | null;
   error: { code: string; message: string } | null;
@@ -72,6 +72,34 @@ interface ProseJson {
   source: 'ai' | 'template';
 }
 
+interface SourceFindingJson {
+  ruleId: string;
+  severity: 'high' | 'medium';
+  path: string;
+  start: { line: number; column: number };
+  end: { line: number; column: number };
+  excerpt: string;
+  title: string;
+  explanation: string;
+  nextAction: string;
+  testFile: boolean;
+  url: string | null;
+  whyItMatters?: ProseJson;
+}
+
+interface SourceCountsJson {
+  eligible: number;
+  checked: number;
+  skippedLimit: number;
+  skippedSize: number;
+  skippedLinks: number;
+  skippedTime: number;
+  fetchFailed: number;
+  skippedParse?: number;
+  listingTruncated: boolean;
+  findingsTruncated: boolean;
+}
+
 interface ReportJson {
   scan: ScanJson;
   summary: string | null;
@@ -81,6 +109,14 @@ interface ReportJson {
   findings: FindingJson[];
   unchecked: { ecosystem: string; package: string; version: string | null; reason: 'unsupported_source' | 'lookup_failed' | 'invalid_name' }[];
   agentPrompt: string | null;
+  dependencyNotChecked?: { status: 'unsupported' | 'failed'; message: string } | null;
+  source?: {
+    status: 'complete' | 'partial' | 'no_files' | 'failed' | null;
+    counts: SourceCountsJson | null;
+    summary: string;
+    findings: SourceFindingJson[];
+    rules?: { id: string; title: string; severity: 'high' | 'medium'; matches: number; inTestFiles: number; shown?: number }[];
+  } | null;
 }
 
 const TERMINAL = new Set(['completed', 'unsupported', 'failed']);
@@ -98,6 +134,7 @@ const button = byId('submit') as HTMLButtonElement;
 const formError = byId('form-error');
 const result = byId('result');
 const authBox = byId('auth');
+const heroSignIn = byId('hero-signin') as HTMLAnchorElement;
 const picker = byId('picker');
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
@@ -314,6 +351,7 @@ function renderMessage(text: string): void {
 const STAGES: { stage: NonNullable<ScanJson['stage']>; label: string }[] = [
   { stage: 'fetching', label: 'Read dependencies' },
   { stage: 'scanning', label: 'Check for known vulnerabilities' },
+  { stage: 'source', label: 'Check source code' },
   { stage: 'analyzing', label: 'Prioritize findings' },
 ];
 
@@ -340,7 +378,9 @@ function renderProgress(scan: ScanJson): void {
           ? 'Fetching the lockfile…'
           : scan.stage === 'scanning'
             ? `Checking ${String(c.totalDeps - c.unsupportedDeps)} dependencies against advisory data…`
-            : 'Preparing your report…';
+            : scan.stage === 'source'
+              ? 'Checking JavaScript/TypeScript source for disabled TLS verification…'
+              : 'Preparing your report…';
   const status = el('div', undefined, scan.status === 'retrying' ? 'error' : 'muted');
   status.append(el('span', undefined, 'spinner'), line);
   box.append(repoTitle(scan), stepsBar(scan), status);
@@ -363,6 +403,8 @@ function summaryCard(report: ReportJson): HTMLElement {
   const box = el('section', undefined, 'card');
   box.append(repoTitle(scan));
   box.append(el('p', report.summary ?? '', 'summary'));
+  // Both independent checks first, then the dependency details.
+  box.append(checksOverview(report));
   box.append(statTiles(report));
   if (report.explanation) box.append(prose(report.explanation, 'explanation'));
   const meta = el('ul', undefined, 'meta');
@@ -403,7 +445,7 @@ function statTiles(report: ReportJson): HTMLElement {
     [`${String(c.checkedDeps)} / ${String(c.totalDeps)}`, 'dependencies checked', false],
     [String(report.actions.length), report.actions.length === 1 ? 'package to act on' : 'packages to act on', false],
     [String(malicious), malicious === 1 ? 'known malicious' : 'known malicious', malicious > 0],
-    [String(report.findings.length), 'advisory records', false],
+    [String(report.findings.length), report.findings.length === 1 ? 'advisory record' : 'advisory records', false],
   ];
   const grid = el('div', undefined, 'stats');
   for (const [value, label, alert] of tiles) {
@@ -446,7 +488,8 @@ function actionCard(a: ActionJson, findings: FindingJson[]): HTMLElement {
   }
 
   const evidence = el('details', undefined, 'evidence');
-  evidence.append(el('summary', `Evidence: ${String(a.versions.reduce((n, v) => n + v.advisories.length, 0))} advisory records`));
+  const records = a.versions.reduce((n, v) => n + v.advisories.length, 0);
+  evidence.append(el('summary', `Evidence: ${String(records)} advisory ${records === 1 ? 'record' : 'records'}`));
   for (const v of a.versions) {
     const f = findings.find((x) => x.ecosystem === a.ecosystem && x.package === a.package && x.installedVersion === v.installedVersion);
     const block = el('div', undefined, 'evidence-version');
@@ -660,9 +703,10 @@ function cleanCard(report: ReportJson): HTMLElement {
       ),
     );
   }
+  box.append(checksOverview(report));
   const notes = el('ul', undefined, 'notes');
   notes.append(
-    el('li', `Checked: ${scan.lockfilePath ?? 'the lockfile'} against ${scan.advisorySource ?? 'advisory data'}. Other files and code in the repository were not reviewed.`),
+    el('li', `Checked: ${scan.lockfilePath ?? 'the lockfile'} against ${scan.advisorySource ?? 'advisory data'}. Source code is covered only by the targeted source checks below.`),
     el('li', 'Advisories are published all the time: rescan later, or after dependency changes.'),
   );
   if (report.ciChecks.length > 0) notes.append(richText('li', `To catch new advisories automatically, add ${report.ciChecks.join(' or ')}.`));
@@ -675,8 +719,13 @@ function cleanCard(report: ReportJson): HTMLElement {
 }
 
 function renderReport(report: ReportJson): void {
+  const source = sourceSection(report);
+  if (report.dependencyNotChecked) {
+    result.replaceChildren(dependencyNotCheckedCard(report), source);
+    return;
+  }
   if (report.findings.length === 0) {
-    result.replaceChildren(cleanCard(report));
+    result.replaceChildren(cleanCard(report), source);
     return;
   }
   const nodes: HTMLElement[] = [summaryCard(report)];
@@ -692,9 +741,223 @@ function renderReport(report: ReportJson): void {
     for (const a of rest) more.append(actionCard(a, report.findings));
     actions.append(more);
   }
-  nodes.push(actions, findingsSection(report));
+  nodes.push(actions, findingsSection(report), source);
   if (report.agentPrompt) nodes.push(promptSection(report));
   result.replaceChildren(...nodes);
+}
+
+/**
+ * The scan completed on its source check alone. Lead with what was checked (the source result), then show both
+ * checks side by side, so a missing or old lockfile doesn't read as if the whole scan stopped.
+ */
+function dependencyNotCheckedCard(report: ReportJson): HTMLElement {
+  const box = el('section', undefined, 'card');
+  box.append(repoTitle(report.scan));
+  box.append(el('p', report.source?.summary ?? 'Source checks finished.', 'summary'));
+  if (report.explanation) box.append(prose(report.explanation, 'explanation'));
+  box.append(checksOverview(report));
+  const row = el('div', undefined, 'row');
+  row.append(scanAgainButton(report.scan));
+  box.append(row);
+  return box;
+}
+
+/**
+ * Source checks, apart from dependency findings: their own summary and coverage, then each finding with its
+ * location at the scanned commit, the matched code, and what to do. Never claims the code is secure.
+ */
+type Tone = 'ok' | 'warn' | 'danger' | 'muted';
+
+/** Where the source check stands, as a short label and a colour. Never "secure". */
+function sourceState(report: ReportJson): { label: string; tone: Tone } {
+  const src = report.source;
+  if (!src || src.status === null) return { label: 'Not run', tone: 'muted' };
+  if (src.status === 'failed') return { label: 'Check failed', tone: 'danger' };
+  if (src.status === 'no_files') return { label: 'No JS/TS files', tone: 'muted' };
+  const { total: n, high: highCount } = sourceTotals(src);
+  if (n === 0) return { label: 'No issues found', tone: 'ok' };
+  const high = highCount > 0;
+  return { label: `${String(n)} ${n === 1 ? 'finding' : 'findings'}`, tone: high ? 'danger' : 'warn' };
+}
+
+/** Every match found (per-rule counts), not just the examples shown. */
+function sourceTotals(src: NonNullable<ReportJson['source']>): { total: number; high: number } {
+  if (src.rules) {
+    const total = src.rules.reduce((n, r) => n + r.matches, 0);
+    return { total, high: src.rules.filter((r) => r.severity === 'high').reduce((n, r) => n + r.matches, 0) };
+  }
+  return { total: src.findings.length, high: src.findings.filter((f) => f.severity === 'high').length };
+}
+
+function dependencyState(report: ReportJson): { label: string; detail: string; tone: Tone } {
+  const note = report.dependencyNotChecked;
+  if (note) return { label: note.status === 'failed' ? 'Could not be checked' : 'Not checked', detail: note.message, tone: 'warn' };
+  const c = report.scan.counts;
+  const detail = `${String(c.checkedDeps)} of ${String(c.totalDeps)} dependencies checked`;
+  if (c.totalDeps === 0) return { label: 'No dependencies', detail: 'The lockfile lists no dependencies.', tone: 'muted' };
+  if (c.checkedDeps === 0) return { label: 'Not assessed', detail, tone: 'warn' };
+  const n = report.actions.length;
+  if (n === 0) return { label: report.scan.coverage === 'partial' ? 'No known vulnerabilities (partial)' : 'No known vulnerabilities', detail, tone: report.scan.coverage === 'partial' ? 'warn' : 'ok' };
+  const serious = report.actions.some((a) => a.isMalicious || a.severity === 'critical' || a.severity === 'high');
+  return { label: `${String(n)} ${n === 1 ? 'package' : 'packages'} to act on`, detail, tone: serious ? 'danger' : 'warn' };
+}
+
+function pill(label: string, tone: Tone): HTMLElement {
+  return el('span', label, `pill pill-${tone}`);
+}
+
+/** The two independent checks side by side, at the top of every report. */
+function checksOverview(report: ReportJson): HTMLElement {
+  const grid = el('div', undefined, 'checks-overview');
+  const dep = dependencyState(report);
+  const depTile = el('div', undefined, `check-tile tone-${dep.tone}`);
+  depTile.append(el('span', 'Dependencies', 'check-tile-name'), pill(dep.label, dep.tone), el('span', dep.detail, 'check-tile-detail'));
+
+  const src = sourceState(report);
+  const c = report.source?.counts;
+  const srcTile = el('a', undefined, `check-tile tone-${src.tone}`);
+  srcTile.href = '#source-checks';
+  srcTile.append(
+    el('span', 'Source code', 'check-tile-name'),
+    pill(src.label, src.tone),
+    el('span', c ? `${String(c.checked)} of ${String(c.eligible)} JavaScript/TypeScript files checked` : 'Not part of this scan', 'check-tile-detail'),
+    el('span', 'View source checks ↓', 'check-tile-link'),
+  );
+  grid.append(depTile, srcTile);
+  return grid;
+}
+
+/**
+ * The source checks: an independent part of the scan, with its own status, coverage and rule checklist, then the
+ * findings grouped by rule. Never claims the code is secure.
+ */
+function sourceSection(report: ReportJson): HTMLElement {
+  const section = el('section', undefined, 'card source-card');
+  section.id = 'source-checks';
+  const src = report.source;
+  const state = sourceState(report);
+
+  const head = el('div', undefined, 'source-head');
+  const titles = el('div');
+  titles.append(el('span', 'Independent check', 'eyebrow'), el('h2', 'Source code checks'));
+  const summary = src ? src.summary.replace(/^(Source checks|Partial source check): /, '') : 'Source checks were not run for this scan.';
+  titles.append(el('p', summary.charAt(0).toUpperCase() + summary.slice(1), 'muted'));
+  const pills = el('div', undefined, 'pills');
+  pills.append(pill(state.label, state.tone));
+  if (src?.status === 'partial') pills.append(pill('Partial coverage', 'warn'));
+  head.append(titles, pills);
+  section.append(head);
+  if (!src || src.status === null) return section;
+
+  const c = src.counts;
+  if (c && src.status !== 'failed') {
+    const { total, high } = sourceTotals(src);
+    const medium = total - high;
+    const grid = el('div', undefined, 'stats');
+    const tiles: [string, string, boolean][] = [
+      [`${String(c.checked)} / ${String(c.eligible)}`, 'JS/TS files checked', false],
+      [String(total), total === 1 ? 'finding' : 'findings', false],
+      [String(high), 'high', high > 0],
+      [String(medium), 'medium', false],
+    ];
+    for (const [value, label, alert] of tiles) {
+      const tile = el('div', undefined, alert ? 'stat alert' : 'stat');
+      tile.append(el('b', value), el('span', label));
+      grid.append(tile);
+    }
+    section.append(grid);
+  }
+
+  // What was checked: every rule, with its result. A clean result shows exactly what "no issues" covers.
+  if (src.rules && src.status !== 'failed' && src.status !== 'no_files') {
+    const list = el('ul', undefined, 'rule-list');
+    for (const r of src.rules) {
+      const li = el('li', undefined, r.matches > 0 ? 'rule-hit' : 'rule-clear');
+      li.append(el('span', r.matches > 0 ? String(r.matches) : '✓', `rule-mark rule-mark-${r.matches > 0 ? r.severity : 'clear'}`));
+      const text = el('div', undefined, 'rule-text');
+      text.append(el('span', r.title, 'strong'), el('code', r.id));
+      li.append(text);
+      const result =
+        r.matches === 0
+          ? 'No match'
+          : `${String(r.matches)} ${r.matches === 1 ? 'match' : 'matches'}${r.inTestFiles > 0 ? ` · ${String(r.inTestFiles)} in tests` : ''}`;
+      li.append(el('span', result, 'rule-result'));
+      list.append(li);
+    }
+    section.append(list);
+  }
+
+  if (c && src.status !== 'failed') {
+    const notes = el('ul', undefined, 'notes muted');
+    const n = (k: number, text: string) => {
+      if (k > 0) notes.append(el('li', `${String(k)} ${text}`));
+    };
+    n(c.skippedLimit, 'files not checked: over the file-count or total-size limit.');
+    n(c.skippedSize, 'files not checked: larger than the per-file limit.');
+    n(c.skippedTime, 'files not checked: the time budget ran out.');
+    n(c.fetchFailed, 'files could not be fetched from GitHub.');
+    n(c.skippedParse ?? 0, 'files could not be read as code (nested too deeply) and were not checked.');
+    n(c.skippedLinks, 'symbolic links or submodules not followed.');
+    if (c.listingTruncated) notes.append(el('li', 'GitHub cut the file listing short: some files were not seen.'));
+    if (notes.childElementCount > 0) section.append(notes);
+  }
+
+  // One card per rule: why it matters and what to do once, then every location.
+  const byRule = new Map<string, SourceFindingJson[]>();
+  for (const f of src.findings) byRule.set(f.ruleId, [...(byRule.get(f.ruleId) ?? []), f]);
+  for (const group of byRule.values()) section.append(sourceRuleCard(group, src.rules?.find((r) => r.id === group[0]?.ruleId)));
+  section.append(
+    el(
+      'p',
+      'Targeted checks for disabled TLS certificate verification in .js, .jsx, .ts and .tsx files at the scanned commit. A match is not proof that the code runs or can be exploited, and no match does not mean the code is secure.',
+      'muted small-print',
+    ),
+  );
+  return section;
+}
+
+/** Matches listed before "N more". */
+const SHOWN_LOCATIONS = 10;
+
+function sourceRuleCard(group: SourceFindingJson[], rule?: { matches: number; inTestFiles: number }): HTMLElement {
+  const first = group[0];
+  const card = el('div', undefined, `action source-finding source-${first?.severity ?? 'medium'}`);
+  if (!first) return card;
+  const head = el('div', undefined, 'action-head');
+  // Counts are of every match found; the list below may show only the highest-priority examples.
+  const matches = rule?.matches ?? group.length;
+  const tests = rule?.inTestFiles ?? group.filter((f) => f.testFile).length;
+  const shown = matches > group.length ? ` (${String(group.length)} shown)` : '';
+  head.append(
+    el('span', first.severity, `tag sev-${first.severity}`),
+    el('span', first.title, 'strong'),
+    el('span', `${String(matches)} ${matches === 1 ? 'match' : 'matches'}${tests > 0 ? `, ${String(tests)} in test files` : ''}${shown}`, 'muted'),
+  );
+  card.append(head);
+  card.append(first.whyItMatters ? prose(first.whyItMatters, 'why', 'Why it matters: ') : el('p', first.explanation), labelled('Next', first.nextAction));
+  const list = el('ul', undefined, 'source-locations');
+  for (const f of group.slice(0, SHOWN_LOCATIONS)) list.append(locationItem(f));
+  card.append(list);
+  if (group.length > SHOWN_LOCATIONS) {
+    const more = el('details', undefined, 'more');
+    more.append(el('summary', `${String(group.length - SHOWN_LOCATIONS)} more`));
+    const rest = el('ul', undefined, 'source-locations');
+    for (const f of group.slice(SHOWN_LOCATIONS)) rest.append(locationItem(f));
+    more.append(rest);
+    card.append(more);
+  }
+  return card;
+}
+
+/** One match: where (linked to the line at the scanned commit), whether it is test code, and the matched code. */
+function locationItem(f: SourceFindingJson): HTMLElement {
+  const li = el('li');
+  const where = `${f.path}:${String(f.start.line)}:${String(f.start.column)}`;
+  const loc = el('div', undefined, 'source-location');
+  loc.append(f.url ? link(where, f.url) : el('code', where));
+  if (f.testFile) loc.append(' ', el('span', 'test file', 'tag test-tag'));
+  li.append(loc, el('code', f.excerpt, 'source-excerpt'));
+  return li;
 }
 
 // --- GitHub sign-in, installations and the repository picker -------------------------------------------
@@ -738,6 +1001,9 @@ async function loadMe(): Promise<void> {
 function renderAuth(): void {
   authBox.replaceChildren();
   document.body.classList.toggle('signed-in', me?.session === 'active');
+  // The hero's sign-in button: only when sign-in exists and nobody is signed in; returns to the current page.
+  heroSignIn.hidden = !me?.signInEnabled || me.session === 'active';
+  heroSignIn.href = signInHref(location.pathname);
   if (!me?.signInEnabled) return;
   if (me.session === 'active' && me.user) {
     const out = el('button', 'Sign out', 'secondary small');

@@ -85,6 +85,26 @@ describe('npm install graph', () => {
     expect(get(pkgs, 'x', '1.0.0')).toMatchObject({ isDirect: false, directParents: [], installPaths: [] });
   });
 
+  it('a peer the project provides itself is not "pulled in" by the package naming it (@eslint/js → eslint)', () => {
+    const pkgs = parse({
+      '': { devDependencies: { '@eslint/js': '10', eslint: '10' } },
+      'node_modules/@eslint/js': { version: '10.0.1', dev: true, peerDependencies: { eslint: '^10.0.0' } },
+      'node_modules/eslint': v('10.14.0', { minimatch: '^10.2.6' }, { dev: true }),
+      'node_modules/minimatch': v('10.2.6', {}, { dev: true }),
+    });
+    expect(get(pkgs, 'minimatch', '10.2.6')).toMatchObject({ directParents: ['eslint'], installPaths: [['eslint', 'minimatch']] });
+  });
+
+  it('a peer npm installed only because of the package that names it still counts as pulled in by it', () => {
+    const pkgs = parse({
+      '': { dependencies: { plugin: '1' } },
+      'node_modules/plugin': { version: '1.0.0', peerDependencies: { host: '1' } },
+      'node_modules/host': v('1.0.0', { leaf: '1' }),
+      'node_modules/leaf': v('1.0.0'),
+    });
+    expect(get(pkgs, 'leaf', '1.0.0')).toMatchObject({ directParents: ['plugin'], installPaths: [['plugin', 'host', 'leaf']] });
+  });
+
   it('install paths are capped at five, shortest first; parents are complete', () => {
     const roots = ['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7'];
     const pkgs = parse({

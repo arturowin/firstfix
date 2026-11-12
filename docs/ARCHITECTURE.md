@@ -13,7 +13,7 @@ create the scan and enqueue its job in one transaction.
 - **API** (`src/api/main.ts`): HTTP routes (zod, Idempotency-Key), `ScanService`, static UI.
   Uses the submission and scan repository ports.
 - **Worker** (`src/worker/main.ts`): `ScanPipeline` = claim → resolve SHA → find a supported lockfile @SHA →
-  parse with its ecosystem's format → advisory lookup (OSV) → rank → build actions → explain → save. Uses ports `RepoSource`, `VulnDatabase`,
+  parse with its ecosystem's format → advisory lookup (OSV) → rank → build actions → source checks → explain → save. Uses ports `RepoSource`, `VulnDatabase`,
   `Explainer`, `ScanRepository`.
 - **Adapters**: GitHub REST API, OSV.dev (the advisory source; see "Advisory source"), LLM (+ template fallback), Postgres, pg-boss.
 - Plain composition root per process; no DI framework. Contract tests show adapters are substitutable.
@@ -21,6 +21,8 @@ create the scan and enqueue its job in one transaction.
   and repository access through `AccessService` (ports `GitHubAuth`, `SessionStore`); the worker reads private
   repositories with a per-scan installation token through the same `RepoSource` port. See
   [Private repositories](#private-repositories-m6).
+- **Source checks (M7):** two targeted JavaScript/TypeScript checks for disabled TLS verification, in the same
+  worker and job, after the dependency check. See [Source checks](#source-checks-m7).
 
 ## Project layout
 
@@ -38,7 +40,8 @@ test/              Unit, integration, and contract tests
 
 ## Data model (current: migrations 001-010)
 Migration 011 (private repositories) is described under
-[Private repositories](#private-repositories-m6).
+[Private repositories](#private-repositories-m6), and migration 012 (source checks: per-check outcomes and
+`source_findings`) under [Source checks](#source-checks-m7).
 ```
 scans(id uuid pk,            -- also the pg-boss job id (send({ id })), same submission tx
       repo_owner, repo_name, repo_url_normalized, commit_sha null,
@@ -399,6 +402,171 @@ can still allow views for up to 5 minutes (the cache lifetime); a removed instal
 use. A repository list longer than 10,000 entries per installation is cut off (and reported as truncated);
 repositories beyond it can't be picked or viewed through FirstFix.
 
+### Source checks (M7)
+Besides dependencies, FirstFix runs two targeted, heuristic checks of JavaScript/TypeScript source for disabled TLS
+certificate verification. They are not general static analysis (SAST): a textual match doesn't prove that the code
+runs, or that the application can be exploited.
+
+**Shape.** The same worker, the same `scan` job and the same commit. No new queue, service, worker or external
+scanner; no new parsing library; repository code is never executed and its dependencies are never installed.
+
+```
+claim → resolve commit (sha + tree sha) → dependency check → source check → prioritize + explain → complete (one locked tx)
+```
+
+**Rules** (`src/domain/source-rules.ts`, pure). Each has an id and a version; the explanation and next action are
+deterministic text from the catalog, looked up by id and version at report time.
+
+| Rule | Matches | Severity | Meaning |
+|---|---|---|---|
+| `FF-TLS-001` v1 | `process.env.NODE_TLS_REJECT_UNAUTHORIZED = <v>` and `process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = <v>` (any quotes), where `<v>` is `'0'`, `"0"`, `` `0` `` or the number `0` | high | Disables certificate verification for every TLS connection the Node.js process makes, if this line runs. |
+| `FF-TLS-002` v1 | An object property `rejectUnauthorized: false` (identifier or quoted key, directly after `{` or `,`), or a member assignment `<expr>.rejectUnauthorized = false` / `<expr>['rejectUnauthorized'] = false` | medium | Turns off certificate verification for the client or agent it configures. Potentially insecure; needs context review (test-only code is common). |
+
+**Detection** (`src/domain/source-scan.ts`, pure). A small error-tolerant JS/TS tokenizer, not a parser.
+- **Tokens:** identifiers, punctuation, numbers, string literals (with their decoded value, `\x30` included) and
+  template literals.
+- **Skipped as code:** `//` and `/* */` comments. Templates with `${…}` substitutions and regular-expression literals
+  are opaque (a `/` starts a regex by the usual previous-token heuristic).
+- **Matching:** rules match token sequences, so whitespace, line breaks and quote style don't matter, and text
+  inside comments, strings, templates and regexes never matches.
+- **The value must be the whole assignment:** `= '0' + x`, `= '0' || y`, `=== '0'` and a ternary
+  `a ? rejectUnauthorized : false` don't match.
+- **Positions:** line and column are 1-based, in UTF-16 code units, as editors and GitHub count them; `\r\n` is one
+  line ending.
+- **Excerpt:** the matched tokens re-joined (no comments, no other string literals), at most 200 characters, so a
+  credential on the same line is never stored.
+- **Robustness:** unterminated strings end at the line break, unterminated comments at the end of the file.
+  Template nesting (templates and `${…}` substitutions) is bounded at 64 levels. A file nested deeper is reported
+  `unparsed` instead of exhausting the stack, and counted as not checked (`skippedParse`, partial coverage). The
+  source check also catches any other error from the scanner per file, so no input can fail the job or discard
+  the dependency results.
+- **Counting vs. storing:** every match is counted per rule (`source_counts.rules`: matches, files, matches in test
+  files). Only 500 examples are stored, chosen by priority, not by the order files were fetched:
+  1. higher severity;
+  2. code outside tests;
+  3. path, line and column.
+
+  A rule never reads as "no match" because its examples were dropped. Summaries, the report and explanations use
+  the counts, and the report says when more were found than are shown. Dropped examples don't make coverage
+  partial, since every file was checked.
+
+Known limits (also in the README):
+- **False negatives:**
+  - aliases (`const env = process.env; env.X = '0'`), keys built at runtime, `Object.assign(process.env, …)`,
+    `??=`/`||=`, computed property keys;
+  - values computed at runtime (`rejectUnauthorized: !verify`), `0` written another way (`!1`, `"0".trim()`);
+  - code inside `${…}`, cross-file flows, `.mjs`/`.cjs`/`.mts`/`.cts`, and files outside the limits below.
+- **False positives:**
+  - a literal object type `{ rejectUnauthorized: false }` in a TypeScript type position;
+  - quotes inside JSX text that the tokenizer reads as strings (rare);
+  - dead code and test-only code, which are reported as found. Findings in test paths (`test/`, `tests/`,
+    `__tests__/`, `__mocks__/`, `*.test.*`, `*.spec.*`) are labelled "test file".
+
+**Source acquisition** (`RepoSource.listTree` / `readSourceFile`; pinned to the commit; the M6 credential rules).
+- **Listing:** `GET /repos/{o}/{r}/git/trees/{tree_sha}?recursive=1`, with the tree SHA from the commit response
+  already fetched (the trees API documents tree SHAs). Checked live on a public repository: `commit.tree.sha`, and
+  entries with `mode`/`type`/`size` and `truncated`.
+  - Public scans use the verified public-only `GITHUB_TOKEN` or none; private scans use the repository-scoped
+    installation token.
+  - `truncated: true` makes coverage partial.
+  - Symlinks (mode `120000`) and submodules (mode `160000`, type `commit`) are counted, never followed.
+- **Reading files:**
+  - public: `raw.githubusercontent.com/{o}/{r}/{commit_sha}/{path}` without credentials, as for lockfiles;
+  - private: the contents API at the commit SHA with the raw media type and the installation token. This is the
+    path already proven live for lockfiles; the blobs API was not needed, and GitHub doesn't document its
+    installation-token permissions.
+  - A `404` while access holds counts as a fetch failure; lost access is `app_access_revoked`.
+- **Eligible files:** `.js`, `.jsx`, `.ts`, `.tsx`.
+  - Not eligible: `.d.ts`, `*.min.js`, `*.bundle.js`.
+  - Excluded anywhere in the path: `node_modules/`, `bower_components/`, `jspm_packages/`, `vendor/`, `dist/`,
+    `build/`, `out/`, `coverage/`, `.next/`, `.nuxt/`, `.svelte-kit/`, `.output/`, `.vercel/`, `.turbo/`,
+    `.cache/`, `.yarn/`, `storybook-static/`, `generated/`, `__generated__/`.
+- **Limits** (worker env):
+  - `SOURCE_MAX_FILES` 200, `SOURCE_MAX_FILE_BYTES` 262144, `SOURCE_MAX_TOTAL_BYTES` 10485760;
+  - 8 fetches at a time;
+  - a 60-second budget for the whole check.
+  - Files over the per-file limit are skipped from the tree's `size` (or while reading) without being stored.
+  - Eligible files are taken in path order until a limit is reached; the rest are counted.
+- **Nothing is kept:** file contents live only in memory during the check.
+
+**Storage (migration 012).**
+- `source_findings(scan_id fk on delete cascade, rule_id, rule_version, severity, path, start_line, start_col,
+  end_line, end_col, excerpt ≤ 200)`.
+- `scans` gains:
+  - `source_status` (`complete` | `partial` | `no_files` | `failed`);
+  - `source_counts jsonb` (`eligible`, `checked`, `skippedLimit`, `skippedSize`, `skippedLinks`, `skippedTime`,
+    `fetchFailed`, `skippedParse`, `listingTruncated`, `findingsTruncated`, and `rules`: per-rule match counts);
+  - `source_error_code`/`message`;
+  - `dependency_status` (`complete` | `unsupported` | `failed`) with its error code and message.
+  - All of these are NULL on older scans.
+- The `stage` check gains `'source'`. `completed_has_coverage` allows a completed scan without dependency coverage
+  only when its dependency check was `unsupported` or `failed`.
+- Source findings never enter `findings`, the fix plan, upgrade counts or the dependency summary line.
+- Both checks are written by `complete()` in the one transaction that locks the owned, non-terminal row; a stale
+  attempt writes nothing. `finish()` also records both checks' outcomes when neither was usable.
+
+**Overall status.** Each check is usable (`complete`, or `partial` with at least one file checked), has nothing to
+check (`unsupported`, `no_files`), or `failed`.
+
+| Case | Dependency check | Source check | Scan status | Report |
+|---|---|---|---|---|
+| a | complete | complete | `completed` | both sections |
+| b | unsupported (no lockfile…) | usable | `completed` | "Dependencies were not checked" with the reason, then source checks |
+| c | complete | partial | `completed` | partial source coverage, with counts |
+| d | complete / failed | failed / usable | `completed` | the failed check shown as failed with its reason, never as clean |
+| e | failed, or unsupported with source failed | not usable | `failed` | the dependency reason first; otherwise "Source checks failed: …. Dependencies: …" |
+| e′ | unsupported | no_files | `unsupported` | the dependency reason (as before source checks) |
+| f | any | no_files | from the dependency check | "Source checks: no JavaScript/TypeScript files to check." |
+
+**Retries without child jobs.**
+- **Earlier attempts:** a transient error in either check throws, and pg-boss retries the whole job. Nothing is
+  saved halfway.
+- **The last attempt:** each check catches its own transient error and ends `failed` ("Retries exhausted: …").
+  - If the other check is usable, the scan completes with it.
+  - If not (case e), the outcome is recorded and the original error is rethrown, so the queue records the job as
+    failed, as before.
+- **Some files fail to fetch:** `partial`, listing how many. All of them failing is transient.
+- **Shared failures** keep their current semantics: repository not found, access revoked, app not configured,
+  empty repository, cancellation.
+- **AI failures** stay separate.
+
+**Progress.** Stages run in this order: `fetching` (read dependencies) → `scanning` (check advisories) → `source`
+(check source code) → `analyzing` (prioritize and explain, once both checks are in). A repository without a usable
+lockfile goes from `fetching` straight to `source`.
+
+**Explanations.**
+- Source issues are explained like dependency actions. The summary paragraph covers both checks, and each matched
+  rule gets a "why it matters" text (`StoredExplanation.sourceRules`), labelled AI or Template.
+- What explainers receive about source checks (`SourceFacts`): per rule, the id, title, severity, the number of
+  matches and files, and how many are in test files. They never receive file paths or code excerpts: both come
+  from the repository and could carry instructions.
+- `checkExplanation` requires exactly one entry per matched rule, and applies the same limits and bans as for
+  actions. Source text may name no versions or advisory IDs.
+- Without a usable dependency check the explainers are told so (`dependenciesChecked: false`) and say nothing
+  about dependency vulnerabilities.
+- When no AI is configured, or its reply fails the check, the template's text is used. The template uses the rule
+  catalog's explanation plus where the matches are ("83 of 86 matches are in test files").
+- The coding-agent prompt is unchanged.
+
+**Report and UI.**
+- When the dependency check didn't complete, the top card leads with the source result. It then shows both checks
+  side by side ("Dependencies: not checked, <reason>" / "Source code: checked, N of M files"), so an unsupported
+  lockfile doesn't read as if the scan stopped. Otherwise the dependency summary card also carries the source
+  summary line.
+- A "Source checks" section follows the dependency actions and findings, with one card per rule (most severe
+  first):
+  - severity, title, the number of matches and how many are in test files;
+  - the "why it matters" text and the next action, once;
+  - then every location: `path:line:column` linked to
+    `https://github.com/{o}/{r}/blob/{sha}/{path}#L{start}[-L{end}]` at the scanned commit, a "test file" label,
+    and the excerpt. The first 10 are shown, the rest under "N more".
+- Coverage notes list what was skipped and why.
+- Wording:
+  - "No issues found by the 2 supported checks in N of M JavaScript/TypeScript files", never "secure";
+  - older scans: "Source checks were not run for this scan".
+- The API exposes `checks` on scan JSON, and `source` and `dependencyNotChecked` on reports.
+- Private reports, source section included, follow the access rules in "Private repositories".
+
 ### Lockfile parsing rules
 - Only `packages` keys containing a `node_modules/` segment are dependencies; the package name is the part
   after the last `node_modules/` (e.g. `node_modules/a/node_modules/@s/b` → `@s/b`). The root `""` entry is the
@@ -547,8 +715,9 @@ Fix information shapes the action, not the rank.
   check how it got in, rotate secrets that were available where it was installed".
 
 ### Evidence vs AI text
-- AI writes only the summary paragraph and per-action "why it matters" (top 10 actions; the rest get template
-  text). Each piece is labelled AI or Template in the UI; facts never come from it.
+- AI writes only the summary paragraph, per-action "why it matters" (top 10 actions; the rest get template
+  text) and per-source-rule "why it matters" (see "Source checks"). Each piece is labelled AI or Template in the
+  UI; facts never come from it.
 - Every explainer's output, the template's included, passes `checkExplanation` (`src/domain/explanation.ts`):
   exactly the expected action IDs (`<ecosystem>:<package>`); each action's text may use only **that action's**
   versions and advisory IDs (the summary may use any action's); length limits; no "secure"/"safe"/"guarantee"/

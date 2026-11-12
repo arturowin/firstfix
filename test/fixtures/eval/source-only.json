@@ -1,0 +1,18 @@
+{
+  "name": "source-only",
+  "description": "lockfileVersion 1, so dependencies were not checked; the source checks found process-wide and client TLS disabling, some in tests. Prose must not talk about dependency vulnerabilities or claim exploitability.",
+  "repo": "example/legacy-api",
+  "checkedDeps": 0,
+  "totalDeps": 0,
+  "findings": [],
+  "dependenciesChecked": false,
+  "source": {
+    "checkedFiles": 12,
+    "eligibleFiles": 12,
+    "partial": false,
+    "rules": [
+      { "ruleId": "FF-TLS-001", "title": "TLS certificate verification disabled for the whole process", "severity": "high", "matches": 1, "files": 1, "inTestFiles": 0 },
+      { "ruleId": "FF-TLS-002", "title": "TLS certificate verification turned off for a client", "severity": "medium", "matches": 3, "files": 2, "inTestFiles": 2 }
+    ]
+  }
+}

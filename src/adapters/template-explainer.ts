@@ -3,7 +3,8 @@
  * text for actions beyond the ones the LLM explains. Mentions no versions or advisory IDs (those are rendered
  * from data elsewhere) and never claims exposure, safety or a fix.
  */
-import { MAX_SUMMARY_CHARS, MAX_WHY_CHARS, type ActionFacts, type ExplainInput, type Explanation } from '../domain/explanation.ts';
+import { MAX_SUMMARY_CHARS, MAX_WHY_CHARS, type ActionFacts, type ExplainInput, type Explanation, type SourceFacts, type SourceRuleFacts } from '../domain/explanation.ts';
+import { SOURCE_RULES } from '../domain/source-rules.ts';
 import type { Explainer } from '../ports/explainer.ts';
 
 const plural = (n: number, one: string, many = `${one}s`) => `${String(n)} ${n === 1 ? one : many}`;
@@ -13,11 +14,54 @@ export class TemplateExplainer implements Explainer {
     return Promise.resolve({
       summary: summary(input),
       actions: input.actions.map((a) => ({ actionId: a.actionId, whyItMatters: why(a) })),
+      sourceRules: (input.source?.rules ?? []).map((r) => ({ ruleId: r.ruleId, whyItMatters: ruleWhy(r) })),
     });
   }
 }
 
+/** The dependency part first (as before source checks), then what the source checks found. */
 function summary(input: ExplainInput): string {
+  const source = input.source;
+  const sourceText = source ? sourceSentence(source) : null;
+  if (!input.dependenciesChecked) {
+    const opening = sourceText ?? 'Dependencies were not checked for this commit, and no source check result is available.';
+    return fit([opening], ['Dependencies were not checked for this commit; the report lists the reason.'], MAX_SUMMARY_CHARS);
+  }
+  const deps = dependencySummary(input);
+  // The source sentence leads when it is the more urgent finding (process-wide TLS off) and dependencies are clean.
+  const urgent = source?.rules.some((r) => r.severity === 'high') === true && input.actions.length === 0;
+  if (sourceText && urgent) return fit([sourceText], [deps], MAX_SUMMARY_CHARS);
+  return sourceText ? fit([deps], [sourceText], MAX_SUMMARY_CHARS) : deps;
+}
+
+function sourceSentence(source: SourceFacts): string {
+  const scope = plural(source.checkedFiles, 'JavaScript/TypeScript file');
+  if (source.rules.length === 0) {
+    return `The source checks look only for disabled TLS certificate verification and found no match in the ${scope} checked.`;
+  }
+  const matches = source.rules.reduce((n, r) => n + r.matches, 0);
+  const inTests = source.rules.reduce((n, r) => n + r.inTestFiles, 0);
+  const processWide = source.rules.some((r) => r.ruleId === 'FF-TLS-001');
+  const lead = processWide
+    ? 'Start with the process-wide TLS setting: it turns off certificate checks for every connection the program makes.'
+    : `The source checks found ${plural(matches, 'place')} where TLS certificate verification is turned off for a client.`;
+  const tests = inTests === matches ? ' All of them are in test files.' : inTests > 0 ? ` ${String(inTests)} of them are in test files.` : '';
+  return `${lead}${processWide ? '' : tests}`;
+}
+
+/** Why a matched source rule matters: the rule's own explanation, plus where the matches are. */
+function ruleWhy(r: SourceRuleFacts): string {
+  const base = SOURCE_RULES.find((x) => x.id === r.ruleId)?.explanation ?? 'A source check matched this code; review it in context.';
+  const where =
+    r.inTestFiles === r.matches
+      ? `All ${plural(r.matches, 'match', 'matches')} are in test files.`
+      : r.inTestFiles > 0
+        ? `${String(r.inTestFiles)} of ${plural(r.matches, 'match', 'matches')} are in test files.`
+        : `${plural(r.matches, 'match', 'matches')} in ${plural(r.files, 'file')}.`;
+  return fit([base], [where], MAX_WHY_CHARS);
+}
+
+function dependencySummary(input: ExplainInput): string {
   const first = input.actions[0];
   if (!first) {
     return input.checkedDeps === 0

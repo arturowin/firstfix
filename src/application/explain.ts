@@ -8,6 +8,7 @@ import {
   explainInput,
   minimalExplanation,
   type Explanation,
+  type SourceFacts,
   type StoredExplanation,
 } from '../domain/explanation.ts';
 import type { Action } from '../domain/fix-plan.ts';
@@ -23,7 +24,15 @@ export interface ExplainDeps {
 
 export async function explainPlan(
   deps: ExplainDeps,
-  facts: { repo: string; summaryLine: string; checkedDeps: number; totalDeps: number; actions: readonly Action[] },
+  facts: {
+    repo: string;
+    summaryLine: string;
+    checkedDeps: number;
+    totalDeps: number;
+    actions: readonly Action[];
+    dependenciesChecked?: boolean;
+    source?: SourceFacts | null;
+  },
   signal: AbortSignal,
 ): Promise<StoredExplanation> {
   const all = explainInput(facts, Infinity);
@@ -48,10 +57,11 @@ export async function explainPlan(
     source: 'template',
     summary: template.summary,
     actions: Object.fromEntries(template.actions.map((a) => [a.actionId, { text: a.whyItMatters, source: 'template' as const }])),
+    sourceRules: Object.fromEntries((template.sourceRules ?? []).map((r) => [r.ruleId, { text: r.whyItMatters, source: 'template' as const }])),
     ...(templateProblem ? { fallbackReason: templateProblem } : {}),
   };
   // Nothing to explain beyond the clean-result wording: no AI call.
-  if (!deps.ai || all.actions.length === 0) return stored;
+  if (!deps.ai || (all.actions.length === 0 && (all.source?.rules.length ?? 0) === 0)) return stored;
 
   const input = explainInput(facts);
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(deps.timeoutMs)]);
@@ -63,6 +73,7 @@ export async function explainPlan(
       stored.source = 'ai';
       stored.summary = out.summary;
       for (const a of out.actions) stored.actions[a.actionId] = { text: a.whyItMatters, source: 'ai' };
+      for (const r of out.sourceRules ?? []) (stored.sourceRules ??= {})[r.ruleId] = { text: r.whyItMatters, source: 'ai' };
       return stored;
     }
     reason = `failed the facts check: ${check.problems.slice(0, 5).join('; ')}`;

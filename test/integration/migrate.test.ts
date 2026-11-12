@@ -43,6 +43,7 @@ describe('migrate', () => {
       'scans',
       'schema_migrations',
       'sessions',
+      'source_findings',
       'unchecked_deps',
     ]);
   });

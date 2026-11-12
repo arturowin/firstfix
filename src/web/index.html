@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>FirstFix · dependency security, in the order to fix it</title>
+    <title>FirstFix · know what to fix first</title>
     <style>
       :root {
         --page: #f5f6fb;
@@ -60,7 +60,6 @@
       .topbar { background: var(--card); border-bottom: 1px solid var(--line); }
       .topbar .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; gap: 12px; }
       .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 800; font-size: 18px; letter-spacing: -0.01em; text-decoration: none; }
-      .mark { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(140deg, var(--violet), #8a5cf6 55%, var(--lime)); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35); }
 
       /* Hero */
       .hero { margin: 20px 0 0; padding: 56px 48px 44px; border-radius: 28px; background: var(--hero); color: #fff; position: relative; overflow: hidden; }
@@ -172,8 +171,69 @@
       @media (prefers-color-scheme: dark) { .private-tag { background: var(--muted); } }
       .hero .notice:not(:empty) { display: inline-block; margin-top: 12px; padding: 6px 12px; border-radius: 8px; background: #fff; color: #0b1530; font-weight: 550; }
 
+      /* Source checks */
+      .source-checks { margin-top: 8px; }
+      .source-finding.source-high { border-left-color: var(--critical); }
+      .source-finding.source-medium { border-left-color: var(--medium); }
+      .source-finding pre { margin: 8px 0; max-height: none; }
+      .source-location { margin-top: 6px; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+      .test-tag { background: var(--unknown); }
+      .source-locations { list-style: none; padding: 0; margin: 10px 0 0; }
+      .source-locations li { padding: 8px 0; border-top: 1px solid var(--line); display: grid; gap: 4px; }
+      .source-excerpt { display: block; width: fit-content; max-width: 100%; overflow-wrap: anywhere; }
+      .small-print { font-size: 13px; margin-top: 14px; }
+      /* Checks overview (top of every report) and the source card */
+      .checks-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin: 14px 0 4px; }
+      .check-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 14px 16px; border: 1px solid var(--line); border-left-width: 4px; border-radius: 14px; background: var(--card); color: var(--fg); text-decoration: none; }
+      a.check-tile { transition: box-shadow 0.15s, border-color 0.15s; }
+      a.check-tile:hover { box-shadow: var(--shadow); }
+      .check-tile.tone-ok { border-left-color: var(--ok); }
+      .check-tile.tone-warn { border-left-color: var(--medium); }
+      .check-tile.tone-danger { border-left-color: var(--critical); }
+      .check-tile.tone-muted { border-left-color: var(--unknown); }
+      .check-tile-name { font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+      .check-tile-detail { font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
+      .check-tile-link { font-size: 13px; font-weight: 600; color: var(--blue); }
+      .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 11px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+      .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+      .pill-ok { background: rgba(29, 138, 91, 0.12); color: var(--ok); }
+      .pill-warn { background: rgba(183, 121, 31, 0.14); color: var(--medium); }
+      .pill-danger { background: rgba(217, 45, 58, 0.12); color: var(--critical); }
+      .pill-muted { background: var(--soft); color: var(--muted); }
+      .pills { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+      .source-card { margin-top: 28px; }
+      .source-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
+      .source-head h2 { margin: 2px 0 4px; }
+      .source-head p { margin: 0; max-width: 640px; }
+      .eyebrow { display: inline-block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--violet); }
+      .rule-list { list-style: none; padding: 0; margin: 14px 0 6px; display: grid; gap: 8px; }
+      .rule-list li { display: grid; grid-template-columns: auto 1fr auto; align-items: center; column-gap: 12px; row-gap: 4px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+      .rule-list li.rule-clear { background: linear-gradient(90deg, rgba(29, 138, 91, 0.06), transparent 60%); }
+      .rule-mark { flex: 0 0 auto; display: inline-grid; place-items: center; min-width: 28px; height: 28px; padding: 0 6px; border-radius: 999px; font-weight: 800; font-size: 13px; color: #fff; }
+      .rule-mark-clear { background: var(--ok); }
+      .rule-mark-high { background: var(--critical); }
+      .rule-mark-medium { background: var(--medium); }
+      .rule-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .rule-text code { width: fit-content; font-size: 12px; }
+      .rule-result { font-size: 13.5px; font-weight: 600; color: var(--muted); text-align: right; }
+      .source-finding .action-head { flex-wrap: wrap; }
+      .rule-hit .rule-result { color: var(--ink); }
+      @media (max-width: 640px) {
+        .rule-list li { grid-template-columns: auto 1fr; }
+        .rule-result { grid-column: 2; text-align: left; }
+        .pills { justify-content: flex-start; }
+      }
+      .checks { list-style: none; padding: 0; margin: 14px 0 4px; display: grid; gap: 8px; }
+      .checks li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+      .check-name { font-weight: 650; color: var(--ink); min-width: 110px; }
+      .check-state { padding: 1px 8px; border-radius: 999px; font-size: 12.5px; font-weight: 650; }
+      .check-on { background: rgba(29, 138, 91, 0.12); color: var(--ok); }
+      .check-off { background: rgba(183, 121, 31, 0.14); color: var(--medium); }
+
       /* Repository picker (signed in), inside the hero */
-      body.signed-in .signed-out-only { display: none; }
+      .hero-signin { display: inline-flex; align-items: center; gap: 10px; margin: -12px 0 22px; padding: 10px 16px; border-radius: 12px; background: rgba(255, 255, 255, 0.16); border: 1px solid rgba(255, 255, 255, 0.45); color: #fff; font-weight: 650; font-size: 15px; text-decoration: none; }
+      .hero-signin:focus-visible { outline: 3px solid var(--lime); outline-offset: 2px; }
+      .hero-signin[hidden], body.has-scan .hero-signin { display: none; }
       .picker:empty { display: none; }
       .picker { max-width: 720px; margin-top: 12px; }
       .picker-row { display: flex; align-items: center; gap: 10px; }
@@ -219,14 +279,18 @@
   <body>
     <header class="topbar">
       <div class="wrap">
-        <a class="brand" href="/"><span class="mark" aria-hidden="true"></span>FirstFix</a>
+        <a class="brand" href="/">FirstFix</a>
         <div id="auth" class="auth"></div>
       </div>
     </header>
     <main class="wrap">
       <section class="hero">
         <h1>Know what to fix <span class="accent">first</span>.</h1>
-        <p class="sub">Paste a GitHub repository URL to check its npm dependencies for known vulnerabilities, ranked, explained, with how to verify each step. <span class="signed-out-only">Public repositories need no account; sign in with GitHub for private ones.</span></p>
+        <p class="sub">Paste a GitHub repository URL to check it for known security issues: ranked, explained, with how to verify each step.</p>
+        <a id="hero-signin" class="hero-signin" href="/auth/login" hidden>
+          <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          Sign in with GitHub to scan private repositories
+        </a>
         <form id="scan-form" novalidate>
           <input id="repo-url" name="repoUrl" type="text" inputmode="url" autocomplete="off"
                  placeholder="https://github.com/owner/repo" aria-label="GitHub repository URL" required />
@@ -235,8 +299,8 @@
         <div id="picker" class="picker"></div>
         <div id="form-error" class="error" role="alert"></div>
         <p class="hero-note">
-          <span class="chip">npm dependency scan</span>
-          <span class="chip">Advisories from OSV.dev</span>
+          <span class="chip">Dependency checks</span>
+          <span class="chip">Source code checks</span>
           <span class="chip">Prioritized fix suggestions</span>
         </p>
       </section>

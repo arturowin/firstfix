@@ -3,10 +3,31 @@ import type { FixStatus } from '../domain/candidate.ts';
 import type { StoredExplanation } from '../domain/explanation.ts';
 import type { EcosystemId } from '../domain/ecosystems/types.ts';
 import type { Scope } from '../domain/lockfile.ts';
+import type { SourceCheckStatus, SourceCounts, SourceSeverity } from '../domain/source-rules.ts';
 import type { RepoAccess } from './repo-source.ts';
 
 export type ScanStatus = 'queued' | 'running' | 'retrying' | 'completed' | 'unsupported' | 'failed';
-export type ScanStage = 'fetching' | 'scanning' | 'analyzing';
+export type ScanStage = 'fetching' | 'scanning' | 'analyzing' | 'source';
+
+/** The dependency check's own outcome. Null on scans from before source checks (read from the scan status). */
+export type DependencyCheck = { status: 'complete' } | { status: 'unsupported' | 'failed'; error: { code: string; message: string } };
+
+/** The source check's outcome. Null on scans from before source checks: "not run". */
+export interface SourceCheck {
+  status: SourceCheckStatus;
+  counts: SourceCounts;
+  error: { code: string; message: string } | null;
+}
+
+export interface SourceFinding {
+  ruleId: string;
+  ruleVersion: number;
+  severity: SourceSeverity;
+  path: string;
+  start: { line: number; column: number };
+  end: { line: number; column: number };
+  excerpt: string;
+}
 
 export interface ScanCounts {
   totalDeps: number;
@@ -38,6 +59,8 @@ export interface ScanView {
   counts: ScanCounts;
   coverage: 'full' | 'partial' | null;
   error: { code: string; message: string } | null;
+  /** Each check's own outcome (null on older scans; see the types). */
+  checks: { dependency: DependencyCheck | null; source: SourceCheck | null };
   createdAt: Date;
   updatedAt: Date;
   completedAt: Date | null;
@@ -93,6 +116,7 @@ export interface ReportData {
   scan: ScanView;
   findings: FindingView[];
   unchecked: UncheckedView[];
+  sourceFindings: SourceFinding[];
 }
 
 export interface StaleCursor {
@@ -110,14 +134,21 @@ export interface ClaimedScan {
   access: RepoAccess;
 }
 
+/**
+ * Both checks' results, written together. When the dependency check didn't complete (no lockfile, or it failed on
+ * the last attempt), its fields are empty and `coverage` is null; the scan completes on its source check.
+ */
 export interface Completion {
-  advisorySource: string;
-  summaryLine: string;
+  advisorySource: string | null;
+  summaryLine: string | null;
   explanation: StoredExplanation | null;
   counts: ScanCounts;
-  coverage: 'full' | 'partial';
+  coverage: 'full' | 'partial' | null;
   findings: FindingInput[];
   unchecked: UncheckedView[];
+  dependency: DependencyCheck;
+  source: SourceCheck;
+  sourceFindings: SourceFinding[];
 }
 
 export interface ScanRepository {
@@ -158,9 +189,10 @@ export interface ScanRepository {
    * Scans that aren't finished are never deleted. Returns how many rows of each went.
    */
   deleteExpired(limits: { scanDays: number; keyHours: number; batchSize: number }): Promise<{ scans: number; keys: number }>;
-  /** Terminal outcome without findings. */
+  /** Terminal outcome without findings; `checks` records each check's outcome when both ran. */
   finish(
     claim: ClaimedScan,
     outcome: { status: 'failed' | 'unsupported'; code: string; message: string },
+    checks?: { dependency: DependencyCheck; source: SourceCheck },
   ): Promise<boolean>;
 }

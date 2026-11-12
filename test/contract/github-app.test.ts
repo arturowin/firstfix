@@ -15,6 +15,7 @@ import type { RepoAccess } from '../../src/ports/repo-source.ts';
 const API = 'https://api.github.com';
 const RAW = 'https://raw.githubusercontent.com';
 const SHA = 'b'.repeat(40);
+const TREE = 'e'.repeat(40);
 const signal = () => new AbortController().signal;
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const PEM = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
@@ -52,7 +53,7 @@ function privateRepo(seen: Seen, options: { listedId?: number; mintStatus?: numb
     }),
     http.get(`${API}/repos/Acme/Secret-App/commits/trunk`, ({ request }) => {
       seen.calls.push({ path: 'commits', auth: request.headers.get('authorization'), accept: null });
-      return HttpResponse.json({ sha: SHA });
+      return HttpResponse.json({ sha: SHA, commit: { tree: { sha: TREE } } });
     }),
     http.get(`${API}/repos/Acme/Secret-App/contents/:file`, ({ request, params }) => {
       const url = new URL(request.url);
@@ -126,7 +127,7 @@ describe('GitHubRepoSource, private path', () => {
     const seen = newSeen();
     privateRepo(seen);
     const gh = source();
-    expect(await gh.resolveDefaultCommit(repo, PRIVATE, signal())).toEqual({ sha: SHA, branch: 'trunk' });
+    expect(await gh.resolveDefaultCommit(repo, PRIVATE, signal())).toEqual({ sha: SHA, branch: 'trunk', treeSha: TREE });
     expect(await gh.readFile(repo, PRIVATE, SHA, 'package-lock.json', signal())).toBe('{"lockfileVersion":3}');
     expect(await gh.readFile(repo, PRIVATE, SHA, 'yarn.lock', signal())).toBeNull();
     expect(seen.calls.every((c) => c.auth === 'Bearer ghs_scoped')).toBe(true);
@@ -198,7 +199,7 @@ describe('GitHubRepoSource, public path never uses private credentials', () => {
         api.push(request.headers.get('authorization'));
         return HttpResponse.json({ default_branch: 'main', private: false });
       }),
-      http.get(`${API}/repos/owner/repo/commits/main`, () => HttpResponse.json({ sha: SHA })),
+      http.get(`${API}/repos/owner/repo/commits/main`, () => HttpResponse.json({ sha: SHA, commit: { tree: { sha: TREE } } })),
       http.get(`${RAW}/owner/repo/:sha/package-lock.json`, ({ request }) => {
         raw.push(request.headers.get('authorization'));
         return HttpResponse.text('{}');

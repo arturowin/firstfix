@@ -10,7 +10,7 @@ import { LlmExplainer } from '../src/adapters/llm/explainer.ts';
 import { llmClientFromEnv, llmTimeoutMs } from '../src/adapters/llm/registry.ts';
 import { TemplateExplainer } from '../src/adapters/template-explainer.ts';
 import { defaultRegistry } from '../src/domain/ecosystems/registry.ts';
-import { checkExplanation, explainInput, type ExplainInput, type Explanation } from '../src/domain/explanation.ts';
+import { checkExplanation, explainInput, type ExplainInput, type Explanation, type SourceFacts } from '../src/domain/explanation.ts';
 import { buildFixPlan, type PlanFinding } from '../src/domain/fix-plan.ts';
 import { summaryLine } from '../src/domain/report-text.ts';
 import type { Explainer } from '../src/ports/explainer.ts';
@@ -22,6 +22,10 @@ interface Fixture {
   checkedDeps: number;
   totalDeps: number;
   findings: PlanFinding[];
+  /** False: the dependency check didn't run (e.g. lockfileVersion 1). Default true. */
+  dependenciesChecked?: boolean;
+  /** Source-check facts (rules and counts only), when the fixture covers them. */
+  source?: SourceFacts;
 }
 
 interface Row {
@@ -50,13 +54,21 @@ const rows: Row[] = [];
 for (const fx of fixtures) {
   const plan = buildFixPlan(fx.findings, (e) => defaultRegistry.ecosystems.get(e)?.versionScheme ?? null);
   const line = summaryLine({ counts: fx, lockfilePath: 'package-lock.json', actions: plan });
-  const facts = { repo: fx.repo, summaryLine: line, checkedDeps: fx.checkedDeps, totalDeps: fx.totalDeps, actions: plan };
+  const facts = {
+    repo: fx.repo,
+    summaryLine: line,
+    checkedDeps: fx.checkedDeps,
+    totalDeps: fx.totalDeps,
+    actions: plan,
+    dependenciesChecked: fx.dependenciesChecked ?? true,
+    source: fx.source ?? null,
+  };
 
   for (const [name, explainer] of explainers) {
     const isAi = explainer === ai;
     // The pipeline explains every action with the template and the top ones with the AI; same here.
     const input = isAi ? explainInput(facts) : explainInput(facts, Infinity);
-    if (isAi && input.actions.length === 0) {
+    if (isAi && input.actions.length === 0 && (input.source?.rules.length ?? 0) === 0) {
       rows.push({ fixture: fx.name, explainer: name, ok: true, ms: 0, problems: [], notes: ['not called: nothing to explain'] });
       continue;
     }

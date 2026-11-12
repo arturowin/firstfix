@@ -20,6 +20,7 @@ import type { ClaimedScan } from '../../src/ports/scan-repository.ts';
 import type { LookupResult, PackageRef, VulnDatabase } from '../../src/ports/vuln-database.ts';
 import { startScanWorker } from '../../src/worker/scan-worker.ts';
 import { createTestEnv, type TestEnv } from '../support/env.ts';
+import { DEPENDENCIES_ONLY, NO_SOURCE_FILES, TREE_SHA } from '../support/checks.ts';
 
 const LOCK = JSON.stringify({
   lockfileVersion: 3,
@@ -30,7 +31,8 @@ const LOCK = JSON.stringify({
 });
 
 const source: RepoSource = {
-  resolveDefaultCommit: () => Promise.resolve({ sha: 'a'.repeat(40), branch: 'main' }),
+  resolveDefaultCommit: () => Promise.resolve({ sha: 'a'.repeat(40), branch: 'main', treeSha: TREE_SHA }),
+  ...NO_SOURCE_FILES,
   readFile: (_r, _a, _s, path) => Promise.resolve(path === 'package-lock.json' ? LOCK : null),
 };
 
@@ -186,6 +188,7 @@ describe('failure behaviour through the real queue', () => {
         coverage: 'full',
         findings: [],
         unchecked: [],
+        ...DEPENDENCIES_ONLY,
       }),
     ).toBe(false);
     expect(await scans.get(id)).toMatchObject({ status: 'completed', error: null });

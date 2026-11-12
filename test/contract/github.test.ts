@@ -7,6 +7,7 @@ import { PermanentError, TransientError } from '../../src/ports/errors.ts';
 const API = 'https://api.github.com';
 const RAW = 'https://raw.githubusercontent.com';
 const SHA = 'a'.repeat(40);
+const TREE = 'e'.repeat(40);
 const repo = { owner: 'owner', name: 'repo' };
 const PUBLIC = { kind: 'public' } as const;
 const signal = () => new AbortController().signal;
@@ -31,7 +32,7 @@ function happyPath(seen: { auth: (string | null)[]; paths: string[] }) {
     }),
     http.get(`${API}/repos/owner/repo/commits/:ref`, ({ request, params }) => {
       seen.paths.push(new URL(request.url).pathname);
-      return params['ref'] === 'main' ? HttpResponse.json({ sha: SHA }) : new HttpResponse(null, { status: 404 });
+      return params['ref'] === 'main' ? HttpResponse.json({ sha: SHA, commit: { tree: { sha: TREE } } }) : new HttpResponse(null, { status: 404 });
     }),
     http.get(`${RAW}/owner/repo/:sha/package-lock.json`, ({ request, params }) => {
       seen.paths.push(new URL(request.url).pathname);
@@ -46,7 +47,7 @@ describe('GitHubRepoSource', () => {
     happyPath(seen);
     const gh = new GitHubRepoSource();
     const commit = await gh.resolveDefaultCommit(repo, PUBLIC, signal());
-    expect(commit).toEqual({ sha: SHA, branch: 'main' });
+    expect(commit).toEqual({ sha: SHA, branch: 'main', treeSha: TREE });
     expect(await gh.readFile(repo, PUBLIC, commit.sha, 'package-lock.json', signal())).toBe('{"lockfileVersion":3}');
     expect(seen.paths).toEqual([
       '/repos/owner/repo',

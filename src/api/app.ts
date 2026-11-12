@@ -57,6 +57,10 @@ function scanJson(s: ScanView) {
     counts: s.counts,
     coverage: s.coverage,
     error: s.error,
+    checks: {
+      dependency: s.checks.dependency,
+      source: s.checks.source ? { status: s.checks.source.status, counts: s.checks.source.counts, error: s.checks.source.error } : null,
+    },
     createdAt: s.createdAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),
     completedAt: s.completedAt?.toISOString() ?? null,
@@ -74,6 +78,8 @@ function reportJson(r: Report) {
     findings: r.findings,
     unchecked: r.unchecked,
     agentPrompt: r.agentPrompt,
+    dependencyNotChecked: r.dependencyNotChecked,
+    source: r.source,
   };
 }
 
