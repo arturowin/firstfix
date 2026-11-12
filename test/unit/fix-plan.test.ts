@@ -432,3 +432,38 @@ describe('coding-agent prompt', () => {
     ).toBeNull();
   });
 });
+
+describe('action wording for a transitive upgrade (minimatch 10.2.6 → 11.0.1 under eslint)', () => {
+  const transitive = (candidate: string, installed = '10.2.6') =>
+    buildFixPlan(
+      [
+        f({
+          package: 'minimatch',
+          installedVersion: installed,
+          advisoryId: 'GHSA-g3hv-75wg-m249',
+          isDirect: false,
+          directParents: ['eslint', 'typescript-eslint'],
+          scope: 'dev',
+          ...cand(candidate),
+        }),
+      ],
+      scheme,
+    )[0];
+
+  it('a major jump forced through the parents warns that it can break them', () => {
+    const steps = describeAction(transitive('11.0.1') ?? expect.fail(), npm.hints).steps.join(' ');
+    expect(steps).toContain('Update eslint and typescript-eslint so it resolves to minimatch 11.0.1');
+    expect(steps).toContain('Forcing a new major version that way can break the packages that depend on minimatch, so run their checks too.');
+  });
+
+  it('no such warning for an upgrade within the same major', () => {
+    const steps = describeAction(transitive('10.2.7') ?? expect.fail(), npm.hints).steps.join(' ');
+    expect(steps).not.toContain('Forcing a new major version');
+  });
+
+  it('verify asks for the affected version to be gone, not for the candidate to be the only one', () => {
+    const { verify } = describeAction(transitive('11.0.1') ?? expect.fail(), npm.hints);
+    expect(verify).toBe('`npm ls minimatch` no longer shows 10.2.6, your tests pass, and a rescan confirms which advisories remain.');
+    expect(verify).not.toMatch(/only the candidate/);
+  });
+});

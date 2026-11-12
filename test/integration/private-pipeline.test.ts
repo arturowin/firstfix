@@ -54,7 +54,8 @@ function privateGitHub(options: { mint?: number } = {}) {
     http.get(`${API}/installation/repositories`, () =>
       HttpResponse.json({ repositories: [{ id: 4242, full_name: 'acme/secret-app', default_branch: 'main', private: true }] }),
     ),
-    http.get(`${API}/repos/acme/secret-app/commits/main`, () => HttpResponse.json({ sha: SHA })),
+    http.get(`${API}/repos/acme/secret-app/commits/main`, () => HttpResponse.json({ sha: SHA, commit: { tree: { sha: 'e'.repeat(40) } } })),
+    http.get(`${API}/repos/acme/secret-app/git/trees/:tree`, () => HttpResponse.json({ tree: [], truncated: false })),
     http.get(`${API}/repos/acme/secret-app/contents/:file`, ({ params }) =>
       params['file'] === 'package-lock.json' ? HttpResponse.text(lock) : new HttpResponse(null, { status: 404 }),
     ),

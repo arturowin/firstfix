@@ -13,6 +13,7 @@ import { PostgresScanRepository } from '../../src/adapters/postgres/scan-reposit
 import { ScanPipeline } from '../../src/application/scan-pipeline.ts';
 import type { RepoSource } from '../../src/ports/repo-source.ts';
 import { createTestEnv, type TestEnv } from '../support/env.ts';
+import { NO_SOURCE_FILES, TREE_SHA } from '../support/checks.ts';
 
 const OSV = 'https://api.osv.dev';
 const MAL = JSON.parse(readFileSync(path.join(import.meta.dirname, '..', 'fixtures', 'osv', 'MAL-2025-20690.json'), 'utf8')) as object;
@@ -25,7 +26,8 @@ const lock = JSON.stringify({
   },
 });
 const source: RepoSource = {
-  resolveDefaultCommit: () => Promise.resolve({ sha: 'a'.repeat(40), branch: 'main' }),
+  resolveDefaultCommit: () => Promise.resolve({ sha: 'a'.repeat(40), branch: 'main', treeSha: TREE_SHA }),
+  ...NO_SOURCE_FILES,
   readFile: (_r, _a, _s, p) => Promise.resolve(p === 'package-lock.json' ? lock : null),
 };
 

@@ -329,6 +329,36 @@ describe('private repositories over HTTP', () => {
       expect((await read(id, outsider)).statusCode).toBe(404);
     });
 
+    it('the source section (with excerpts) is protected like the rest of a private report', async () => {
+      const id = await submitPrivate(await signIn('ghu_member'));
+      const scans = new PostgresScanRepository(env.pool);
+      const claim = await scans.claim(id);
+      if (!claim) throw new Error('claim failed');
+      await scans.recordProgress(claim, { commitSha: 'a'.repeat(40) });
+      await scans.complete(claim, {
+        advisorySource: null,
+        summaryLine: null,
+        explanation: null,
+        counts: { totalDeps: 0, checkedDeps: 0, unsupportedDeps: 0, failedLookups: 0 },
+        coverage: null,
+        findings: [],
+        unchecked: [],
+        dependency: { status: 'unsupported', error: { code: 'no_lockfile', message: 'No package-lock.json.' } },
+        source: { status: 'complete', counts: { eligible: 1, checked: 1, skippedLimit: 0, skippedSize: 0, skippedLinks: 0, skippedTime: 0, fetchFailed: 0, skippedParse: 0, listingTruncated: false, findingsTruncated: false }, error: null },
+        sourceFindings: [
+          { ruleId: 'FF-TLS-002', ruleVersion: 1, severity: 'medium', path: 'src/client.ts', start: { line: 3, column: 5 }, end: { line: 3, column: 29 }, excerpt: 'rejectUnauthorized: false' },
+        ],
+      });
+      const owner = await read(id, await signIn('ghu_member'), '/report');
+      expect(owner.statusCode).toBe(200);
+      expect(owner.json<{ source: { findings: { excerpt: string }[] } }>().source.findings[0]?.excerpt).toBe('rejectUnauthorized: false');
+      for (const viewer of [await signIn('ghu_colleague'), undefined]) {
+        const res = await read(id, viewer, '/report');
+        expect(res.statusCode).toBe(404);
+        expect(res.body).not.toContain('rejectUnauthorized');
+      }
+    });
+
     it('without a valid session, a private scan and a missing scan get the same answer', async () => {
       const id = await submitPrivate(await signIn('ghu_member'));
       const missing = '00000000-0000-4000-8000-000000000000';

@@ -16,6 +16,7 @@ import { PgBossJobQueue } from '../adapters/pgboss/job-queue.ts';
 import { TemplateExplainer } from '../adapters/template-explainer.ts';
 import { LlmExplainer } from '../adapters/llm/explainer.ts';
 import { llmClientFromEnv, llmTimeoutMs } from '../adapters/llm/registry.ts';
+import { DEFAULT_SOURCE_CHECK } from '../application/source-check.ts';
 
 const databaseUrl = process.env['DATABASE_URL'];
 if (!databaseUrl) {
@@ -67,12 +68,27 @@ await ensureQueues(boss);
 const llm = llmClientFromEnv(process.env);
 console.log(JSON.stringify({ msg: 'explanations', llm: llm ? `${llm.provider}/${llm.model}` : 'none (template only)' }));
 
+// Source-check limits (docs/ARCHITECTURE.md "Source checks"); positive integers, defaults otherwise.
+const limit = (name: string, fallback: number) => {
+  const n = Number(process.env[name]);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+};
+const sourceCheck = {
+  ...DEFAULT_SOURCE_CHECK,
+  limits: {
+    maxFiles: limit('SOURCE_MAX_FILES', DEFAULT_SOURCE_CHECK.limits.maxFiles),
+    maxFileBytes: limit('SOURCE_MAX_FILE_BYTES', DEFAULT_SOURCE_CHECK.limits.maxFileBytes),
+    maxTotalBytes: limit('SOURCE_MAX_TOTAL_BYTES', DEFAULT_SOURCE_CHECK.limits.maxTotalBytes),
+  },
+};
+
 const scans = new PostgresScanRepository(pool);
 const sessionRetention = new PostgresSessionRetention(pool);
 const pipeline = new ScanPipeline({
   scans,
   source: new GitHubRepoSource({ token: publicToken, appTokens }),
   vulns: new OsvVulnDatabase(),
+  sourceCheck,
   explain: {
     ai: llm ? new LlmExplainer(llm) : null,
     template: new TemplateExplainer(),

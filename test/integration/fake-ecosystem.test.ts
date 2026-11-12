@@ -63,7 +63,8 @@ const osvQueries: { package: { ecosystem: string; name: string }; version: strin
 
 const server = setupServer(
   http.get('https://api.github.com/repos/o/:repo', () => HttpResponse.json({ default_branch: 'main' })),
-  http.get('https://api.github.com/repos/o/:repo/commits/main', () => HttpResponse.json({ sha: SHA })),
+  http.get('https://api.github.com/repos/o/:repo/commits/main', () => HttpResponse.json({ sha: SHA, commit: { tree: { sha: 'e'.repeat(40) } } })),
+  http.get('https://api.github.com/repos/o/:repo/git/trees/:tree', () => HttpResponse.json({ tree: [], truncated: false })),
   http.get(`https://raw.githubusercontent.com/o/fakeco/${SHA}/fake.lock`, () =>
     HttpResponse.text('widget==1.2.0\nclean==2.0.0\nlocal @ ./vendor/local\n'),
   ),

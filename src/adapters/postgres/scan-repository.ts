@@ -10,6 +10,9 @@ import type {
   ScanStatus,
   ScanView,
   ScanVisibility,
+  DependencyCheck,
+  SourceCheck,
+  SourceFinding,
   StaleCursor,
   StaleScan,
   UncheckedView,
@@ -18,6 +21,7 @@ import type { AffectedRange, Severity } from '../../domain/advisory.ts';
 import type { FixStatus } from '../../domain/candidate.ts';
 import type { StoredExplanation } from '../../domain/explanation.ts';
 import type { Scope } from '../../domain/lockfile.ts';
+import { NO_SOURCE_COUNTS, type SourceCheckStatus, type SourceCounts, type SourceSeverity } from '../../domain/source-rules.ts';
 import { isStorableText, storableText } from '../../domain/text.ts';
 import { inTransactionOrRollback, Rollback } from './pool.ts';
 
@@ -45,6 +49,13 @@ interface ScanRow {
   coverage: 'full' | 'partial' | null;
   error_code: string | null;
   error_message: string | null;
+  dependency_status: 'complete' | 'unsupported' | 'failed' | null;
+  dependency_error_code: string | null;
+  dependency_error_message: string | null;
+  source_status: SourceCheckStatus | null;
+  source_counts: Partial<SourceCounts> | null;
+  source_error_code: string | null;
+  source_error_message: string | null;
   created_at: Date;
   updated_at: Date;
   completed_at: Date | null;
@@ -77,10 +88,40 @@ function toView(r: ScanRow): ScanView {
     },
     coverage: r.coverage,
     error: r.error_code ? { code: r.error_code, message: r.error_message ?? '' } : null,
+    checks: { dependency: dependencyOf(r), source: sourceOf(r) },
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     completedAt: r.completed_at,
   };
+}
+
+function dependencyOf(r: ScanRow): DependencyCheck | null {
+  if (r.dependency_status === null) return null;
+  if (r.dependency_status === 'complete') return { status: 'complete' };
+  return { status: r.dependency_status, error: { code: r.dependency_error_code ?? '', message: r.dependency_error_message ?? '' } };
+}
+
+function sourceOf(r: ScanRow): SourceCheck | null {
+  if (r.source_status === null) return null;
+  return {
+    status: r.source_status,
+    counts: { ...NO_SOURCE_COUNTS, ...(r.source_counts ?? {}) },
+    error: r.source_error_code ? { code: r.source_error_code, message: r.source_error_message ?? '' } : null,
+  };
+}
+
+/** Column values for both checks' outcomes. */
+function checkColumns(checks: { dependency: DependencyCheck; source: SourceCheck }): unknown[] {
+  const dep = checks.dependency;
+  return [
+    dep.status,
+    dep.status === 'complete' ? null : dep.error.code,
+    dep.status === 'complete' ? null : dep.error.message,
+    checks.source.status,
+    JSON.stringify(checks.source.counts),
+    checks.source.error?.code ?? null,
+    checks.source.error?.message ?? null,
+  ];
 }
 
 /**
@@ -162,6 +203,30 @@ export class PostgresScanRepository implements ScanRepository {
          FROM findings WHERE scan_id = $1 ORDER BY ecosystem, package, installed_version, advisory_id`,
       [scanId],
     );
+    const source = await this.pool.query<{
+      rule_id: string;
+      rule_version: number;
+      severity: SourceSeverity;
+      path: string;
+      start_line: number;
+      start_col: number;
+      end_line: number;
+      end_col: number;
+      excerpt: string;
+    }>(
+      `SELECT rule_id, rule_version, severity, path, start_line, start_col, end_line, end_col, excerpt
+         FROM source_findings WHERE scan_id = $1 ORDER BY CASE severity WHEN 'high' THEN 0 ELSE 1 END, path, start_line, start_col`,
+      [scanId],
+    );
+    const sourceFindings: SourceFinding[] = source.rows.map((f) => ({
+      ruleId: f.rule_id,
+      ruleVersion: f.rule_version,
+      severity: f.severity,
+      path: f.path,
+      start: { line: f.start_line, column: f.start_col },
+      end: { line: f.end_line, column: f.end_col },
+      excerpt: f.excerpt,
+    }));
     const unchecked = await this.pool.query<UncheckedView>(
       `SELECT ecosystem, package, version, reason FROM unchecked_deps WHERE scan_id = $1
         ORDER BY ecosystem, package, version`,
@@ -193,6 +258,7 @@ export class PostgresScanRepository implements ScanRepository {
         }),
       ),
       unchecked: unchecked.rows,
+      sourceFindings,
     };
   }
 
@@ -255,6 +321,33 @@ export class PostgresScanRepository implements ScanRepository {
 
       await client.query('DELETE FROM findings WHERE scan_id = $1', [claim.scanId]);
       await client.query('DELETE FROM unchecked_deps WHERE scan_id = $1', [claim.scanId]);
+      await client.query('DELETE FROM source_findings WHERE scan_id = $1', [claim.scanId]);
+
+      if (c.sourceFindings.length > 0) {
+        await client.query(
+          `INSERT INTO source_findings (scan_id, rule_id, rule_version, severity, path, start_line, start_col, end_line, end_col, excerpt)
+           SELECT $1, f.rule_id, f.rule_version, f.severity, f.path, f.start_line, f.start_col, f.end_line, f.end_col, f.excerpt
+             FROM jsonb_to_recordset($2::jsonb) AS f(
+                  rule_id text, rule_version integer, severity text, path text,
+                  start_line integer, start_col integer, end_line integer, end_col integer, excerpt text)`,
+          [
+            claim.scanId,
+            storableJson(
+              c.sourceFindings.map((f) => ({
+                rule_id: f.ruleId,
+                rule_version: f.ruleVersion,
+                severity: f.severity,
+                path: f.path,
+                start_line: f.start.line,
+                start_col: f.start.column,
+                end_line: f.end.line,
+                end_col: f.end.column,
+                excerpt: f.excerpt,
+              })),
+            ),
+          ],
+        );
+      }
 
       if (c.findings.length > 0) {
         await client.query(
@@ -313,7 +406,9 @@ export class PostgresScanRepository implements ScanRepository {
             SET status = 'completed', coverage = $3,
                 total_deps = $4, checked_deps = $5, unsupported_deps = $6, failed_lookups = $7,
                 advisory_source = $8, summary_line = $9,
-                explanation = $10::jsonb, explanation_source = $11
+                explanation = $10::jsonb, explanation_source = $11,
+                dependency_status = $12, dependency_error_code = $13, dependency_error_message = $14,
+                source_status = $15, source_counts = $16::jsonb, source_error_code = $17, source_error_message = $18
           WHERE id = $1 AND attempt = $2`,
         [
           claim.scanId,
@@ -327,6 +422,7 @@ export class PostgresScanRepository implements ScanRepository {
           c.summaryLine,
           c.explanation === null ? null : storableJson(c.explanation),
           c.explanation?.source ?? null,
+          ...checkColumns(c),
         ],
       );
       if (done.rowCount !== 1) throw new Error(`completion update matched ${String(done.rowCount)} rows under lock`);
@@ -384,12 +480,21 @@ export class PostgresScanRepository implements ScanRepository {
   async finish(
     claim: ClaimedScan,
     outcome: { status: 'failed' | 'unsupported'; code: string; message: string },
+    checks?: { dependency: DependencyCheck; source: SourceCheck },
   ): Promise<boolean> {
-    const res = await this.pool.query(
-      `UPDATE scans SET status = $3, error_code = $4, error_message = $5
-        WHERE id = $1 AND attempt = $2 AND status NOT IN ${TERMINAL}`,
-      [claim.scanId, claim.attempt, outcome.status, outcome.code, outcome.message],
-    );
+    const res = checks
+      ? await this.pool.query(
+          `UPDATE scans SET status = $3, error_code = $4, error_message = $5,
+                  dependency_status = $6, dependency_error_code = $7, dependency_error_message = $8,
+                  source_status = $9, source_counts = $10::jsonb, source_error_code = $11, source_error_message = $12
+            WHERE id = $1 AND attempt = $2 AND status NOT IN ${TERMINAL}`,
+          [claim.scanId, claim.attempt, outcome.status, outcome.code, outcome.message, ...checkColumns(checks)],
+        )
+      : await this.pool.query(
+          `UPDATE scans SET status = $3, error_code = $4, error_message = $5
+            WHERE id = $1 AND attempt = $2 AND status NOT IN ${TERMINAL}`,
+          [claim.scanId, claim.attempt, outcome.status, outcome.code, outcome.message],
+        );
     return res.rowCount === 1;
   }
 }

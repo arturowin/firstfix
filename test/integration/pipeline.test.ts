@@ -8,6 +8,7 @@ import { PermanentError, TransientError } from '../../src/ports/errors.ts';
 import type { RepoSource } from '../../src/ports/repo-source.ts';
 import type { AdvisoryLookup, VulnDatabase } from '../../src/ports/vuln-database.ts';
 import { createTestEnv, type TestEnv } from '../support/env.ts';
+import { NO_SOURCE_FILES, TREE_SHA } from '../support/checks.ts';
 
 const SHA = 'b'.repeat(40);
 const signal = () => new AbortController().signal;
@@ -18,7 +19,8 @@ function lockfile(packages: Record<string, unknown>, lockfileVersion = 3): strin
 
 function source(lock: string | null | Error): RepoSource {
   return {
-    resolveDefaultCommit: () => Promise.resolve({ sha: SHA, branch: 'main' }),
+    resolveDefaultCommit: () => Promise.resolve({ sha: SHA, branch: 'main', treeSha: TREE_SHA }),
+    ...NO_SOURCE_FILES,
     readFile: (_repo, _access, _sha, path) =>
       lock instanceof Error ? Promise.reject(lock) : Promise.resolve(path === 'package-lock.json' ? lock : null),
   };
@@ -299,6 +301,7 @@ describe('ScanPipeline (real Postgres, fake GitHub/OSV ports)', () => {
       source: {
         resolveDefaultCommit: () => Promise.reject(new PermanentError('repo_not_found', 'Repository not found or private')),
         readFile: () => Promise.resolve(null),
+        ...NO_SOURCE_FILES,
       },
       vulns: vulns(new Map()),
     });

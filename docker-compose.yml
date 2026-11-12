@@ -64,6 +64,10 @@ services:
       # Optional: private repositories through the FirstFix GitHub App (both or neither).
       GITHUB_APP_CLIENT_ID: ${GITHUB_APP_CLIENT_ID:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      # Source checks: limits per scan (defaults: 200 files, 256 KB each, 10 MB total).
+      SOURCE_MAX_FILES: ${SOURCE_MAX_FILES:-200}
+      SOURCE_MAX_FILE_BYTES: ${SOURCE_MAX_FILE_BYTES:-262144}
+      SOURCE_MAX_TOTAL_BYTES: ${SOURCE_MAX_TOTAL_BYTES:-10485760}
       # Optional: AI-written explanations. Without a key, a template writes them (the report is complete either way).
       LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
       LLM_API_KEY: ${LLM_API_KEY:-}

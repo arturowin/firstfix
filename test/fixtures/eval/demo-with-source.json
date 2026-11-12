@@ -1,0 +1,1200 @@
+{
+  "name": "demo-with-source",
+  "description": "The demo dependencies plus test-only client TLS disabling: dependency actions still come first; the source text says the matches are in tests.",
+  "repo": "arturowin/scan-review-demo",
+  "checkedDeps": 106,
+  "totalDeps": 107,
+  "findings": [
+    {
+      "ecosystem": "npm",
+      "package": "flatmap-stream",
+      "installedAs": [],
+      "directAs": [
+        "flatmap-stream"
+      ],
+      "installedVersion": "0.1.1",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-9x64-5r7x-2q53",
+      "severity": "critical",
+      "isMalicious": true,
+      "title": "Malicious Package in flatmap-stream",
+      "candidateVersion": null,
+      "fixStatus": "no_fix",
+      "affectedRanges": [
+        {
+          "kind": "versions",
+          "versions": [
+            "0.1.1"
+          ]
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "flatmap-stream",
+      "installedAs": [],
+      "directAs": [
+        "flatmap-stream"
+      ],
+      "installedVersion": "0.1.1",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-mh6f-8j2x-4483",
+      "severity": "critical",
+      "isMalicious": true,
+      "title": "Critical severity vulnerability that affects event-stream and flatmap-stream",
+      "candidateVersion": null,
+      "fixStatus": "no_fix",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": null,
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "flatmap-stream",
+      "installedAs": [],
+      "directAs": [
+        "flatmap-stream"
+      ],
+      "installedVersion": "0.1.1",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "MAL-2025-20690",
+      "severity": "unknown",
+      "isMalicious": true,
+      "title": "Malicious code in flatmap-stream (npm)",
+      "candidateVersion": null,
+      "fixStatus": "no_fix",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": null,
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "form-data",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "2.3.3",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "request"
+      ],
+      "advisoryId": "GHSA-fjxv-7rqg-78g4",
+      "severity": "critical",
+      "isMalicious": false,
+      "title": "form-data uses unsafe random function in form-data for choosing boundary",
+      "candidateVersion": "2.5.4",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "2.5.4",
+          "introduced": "0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "3.0.4",
+          "introduced": "3.0.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "4.0.4",
+          "introduced": "4.0.0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "minimist",
+      "installedAs": [],
+      "directAs": [
+        "minimist"
+      ],
+      "installedVersion": "1.2.0",
+      "scope": "dev",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-xvch-5gv4-984h",
+      "severity": "critical",
+      "isMalicious": false,
+      "title": "Prototype Pollution in minimist",
+      "candidateVersion": "1.2.6",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "1.2.6",
+          "introduced": "1.0.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "0.2.4",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "lodash",
+      "installedAs": [],
+      "directAs": [
+        "lodash"
+      ],
+      "installedVersion": "4.17.20",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-35jh-r3h4-6jhm",
+      "severity": "high",
+      "isMalicious": false,
+      "title": "Command Injection in lodash",
+      "candidateVersion": "4.17.21",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "4.17.21",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "lodash",
+      "installedAs": [],
+      "directAs": [
+        "lodash"
+      ],
+      "installedVersion": "4.17.20",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-r5fr-rjxr-66jc",
+      "severity": "high",
+      "isMalicious": false,
+      "title": "lodash vulnerable to Code Injection via `_.template` imports key names",
+      "candidateVersion": "4.18.0",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "4.18.0",
+          "introduced": "4.0.0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "postcss",
+      "installedAs": [],
+      "directAs": [
+        "postcss"
+      ],
+      "installedVersion": "7.0.35",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-6g55-p6wh-862q",
+      "severity": "high",
+      "isMalicious": false,
+      "title": "PostCSS: Arbitrary file read and information disclosure via attacker-controlled sourceMappingURL in CSS comments",
+      "candidateVersion": "8.5.12",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "8.5.12",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "postcss",
+      "installedAs": [],
+      "directAs": [
+        "postcss"
+      ],
+      "installedVersion": "7.0.35",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-r28c-9q8g-f849",
+      "severity": "high",
+      "isMalicious": false,
+      "title": "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure",
+      "candidateVersion": "8.5.18",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "8.5.18",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "body-parser",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "1.19.0",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "express"
+      ],
+      "advisoryId": "GHSA-27r3-jxmh-p828",
+      "severity": "high",
+      "isMalicious": false,
+      "title": "body-parser vulnerable to Denial of Service via trailing bytes after a compressed request body",
+      "candidateVersion": "1.20.9",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "2.4.0",
+          "introduced": "2.0.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "1.20.9",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "body-parser",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "1.19.0",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "express"
+      ],
+      "advisoryId": "GHSA-qwcr-r2fm-qrc7",
+      "severity": "high",
+      "isMalicious": false,
+      "title": "body-parser vulnerable to denial of service when url encoding is enabled",
+      "candidateVersion": "1.20.3",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "1.20.3",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "form-data",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "2.3.3",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "request"
+      ],
+      "advisoryId": "GHSA-hmw2-7cc7-3qxx",
+      "severity": "high",
+      "isMalicious": false,
+      "title": "form-data: CRLF injection in form-data via unescaped multipart field names and filenames",
+      "candidateVersion": "2.5.6",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "2.5.6",
+          "introduced": "0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "3.0.5",
+          "introduced": "3.0.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "4.0.6",
+          "introduced": "4.0.0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "path-to-regexp",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "0.1.7",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "express"
+      ],
+      "advisoryId": "GHSA-37ch-88jc-xwx2",
+      "severity": "high",
+      "isMalicious": false,
+      "title": "path-to-regexp vulnerable to Regular Expression Denial of Service via multiple route parameters",
+      "candidateVersion": "0.1.13",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "0.1.13",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "path-to-regexp",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "0.1.7",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "express"
+      ],
+      "advisoryId": "GHSA-9wv6-86v2-598j",
+      "severity": "high",
+      "isMalicious": false,
+      "title": "path-to-regexp outputs backtracking regular expressions",
+      "candidateVersion": "0.1.10",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "1.9.0",
+          "introduced": "0.2.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "0.1.10",
+          "introduced": "0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "8.0.0",
+          "introduced": "7.0.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "3.3.0",
+          "introduced": "2.0.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "6.3.0",
+          "introduced": "4.0.0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "path-to-regexp",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "0.1.7",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "express"
+      ],
+      "advisoryId": "GHSA-rhx6-c78j-4q9w",
+      "severity": "high",
+      "isMalicious": false,
+      "title": "path-to-regexp contains a ReDoS",
+      "candidateVersion": "0.1.12",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "0.1.12",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "qs",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "6.7.0",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "express"
+      ],
+      "advisoryId": "GHSA-hrpp-h998-j3pp",
+      "severity": "high",
+      "isMalicious": false,
+      "title": "qs vulnerable to Prototype Pollution",
+      "candidateVersion": "6.7.3",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "6.10.3",
+          "introduced": "6.10.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "6.9.7",
+          "introduced": "6.9.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "6.8.3",
+          "introduced": "6.8.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "6.7.3",
+          "introduced": "6.7.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "6.6.1",
+          "introduced": "6.6.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "6.5.3",
+          "introduced": "6.5.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "6.4.1",
+          "introduced": "6.4.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "6.3.3",
+          "introduced": "6.3.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "6.2.4",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "express",
+      "installedAs": [],
+      "directAs": [
+        "express"
+      ],
+      "installedVersion": "4.17.1",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-rv95-896h-c2vc",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "Express.js Open Redirect in malformed URLs",
+      "candidateVersion": "4.19.2",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "4.19.2",
+          "introduced": "0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "5.0.0-beta.3",
+          "introduced": "5.0.0-alpha.1",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "lodash",
+      "installedAs": [],
+      "directAs": [
+        "lodash"
+      ],
+      "installedVersion": "4.17.20",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-29mw-wpgm-hmr9",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "Regular Expression Denial of Service (ReDoS) in lodash",
+      "candidateVersion": "4.17.21",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "4.17.21",
+          "introduced": "4.0.0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "lodash",
+      "installedAs": [],
+      "directAs": [
+        "lodash"
+      ],
+      "installedVersion": "4.17.20",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-xxjr-mmjv-4gpg",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "Lodash has Prototype Pollution Vulnerability in `_.unset`, `_.omit`, and `_.pullAt` functions",
+      "candidateVersion": "4.17.23",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "4.17.23",
+          "introduced": "4.0.0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "postcss",
+      "installedAs": [],
+      "directAs": [
+        "postcss"
+      ],
+      "installedVersion": "7.0.35",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-566m-qj78-rww5",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "Regular Expression Denial of Service in postcss",
+      "candidateVersion": "7.0.36",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "8.2.13",
+          "introduced": "8.0.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "7.0.36",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "postcss",
+      "installedAs": [],
+      "directAs": [
+        "postcss"
+      ],
+      "installedVersion": "7.0.35",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-7fh5-64p2-3v2j",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "PostCSS line return parsing error",
+      "candidateVersion": "8.4.31",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "8.4.31",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "postcss",
+      "installedAs": [],
+      "directAs": [
+        "postcss"
+      ],
+      "installedVersion": "7.0.35",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-fxqj-rqcc-2cmp",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "PostCSS: incomplete fix of GHSA-6g55-p6wh-862q \u2014 attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset",
+      "candidateVersion": "8.5.23",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "8.5.23",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "postcss",
+      "installedAs": [],
+      "directAs": [
+        "postcss"
+      ],
+      "installedVersion": "7.0.35",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-hwj9-h5mp-3pm3",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "Regular Expression Denial of Service in postcss",
+      "candidateVersion": "7.0.36",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "7.0.36",
+          "introduced": "7.0.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "8.2.10",
+          "introduced": "8.0.0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "postcss",
+      "installedAs": [],
+      "directAs": [
+        "postcss"
+      ],
+      "installedVersion": "7.0.35",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-qx2v-qp2m-jg93",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "PostCSS has XSS via Unescaped </style> in its CSS Stringify Output",
+      "candidateVersion": "8.5.10",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "8.5.10",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "request",
+      "installedAs": [],
+      "directAs": [
+        "request"
+      ],
+      "installedVersion": "2.88.2",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-p8p7-x288-28g6",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "Server-Side Request Forgery in Request",
+      "candidateVersion": null,
+      "fixStatus": "no_fix",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": null,
+          "introduced": "0",
+          "lastAffected": "2.88.2"
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "qs",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "6.5.5",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "request"
+      ],
+      "advisoryId": "GHSA-4mjr-xmp4-gh2g",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "qs: Denial of Service via Attacker Controlled isBuffer",
+      "candidateVersion": "6.16.0",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "6.16.0",
+          "introduced": "2.2.5",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "qs",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "6.5.5",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "request"
+      ],
+      "advisoryId": "GHSA-6rw7-vpxm-498p",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "qs's arrayLimit bypass in its bracket notation allows DoS via memory exhaustion",
+      "candidateVersion": "6.14.1",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "6.14.1",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "qs",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "6.7.0",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "express"
+      ],
+      "advisoryId": "GHSA-4mjr-xmp4-gh2g",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "qs: Denial of Service via Attacker Controlled isBuffer",
+      "candidateVersion": "6.16.0",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "6.16.0",
+          "introduced": "2.2.5",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "qs",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "6.7.0",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "express"
+      ],
+      "advisoryId": "GHSA-6pq8-jhm2-2vcw",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "qs : qs.stringify with arrayFormat 'comma' throws an uncaught TypeError on array elements carrying a non-callable own toString (DoS)",
+      "candidateVersion": "6.16.1",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "6.16.1",
+          "introduced": "6.7.0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "qs",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "6.7.0",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "express"
+      ],
+      "advisoryId": "GHSA-6rw7-vpxm-498p",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "qs's arrayLimit bypass in its bracket notation allows DoS via memory exhaustion",
+      "candidateVersion": "6.14.1",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "6.14.1",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "tough-cookie",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "2.5.0",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "request"
+      ],
+      "advisoryId": "GHSA-72xf-g2v4-qvf3",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "tough-cookie Prototype Pollution vulnerability",
+      "candidateVersion": "4.1.3",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "4.1.3",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "uuid",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "3.4.0",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "request"
+      ],
+      "advisoryId": "GHSA-w5hq-g745-h8pq",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided",
+      "candidateVersion": "11.1.1",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "11.1.1",
+          "introduced": "0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "12.0.1",
+          "introduced": "12.0.0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "13.0.1",
+          "introduced": "13.0.0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "minimist",
+      "installedAs": [],
+      "directAs": [
+        "minimist"
+      ],
+      "installedVersion": "1.2.0",
+      "scope": "dev",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-vh95-rmgr-6w4m",
+      "severity": "medium",
+      "isMalicious": false,
+      "title": "Prototype Pollution in minimist",
+      "candidateVersion": "1.2.3",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "0.2.1",
+          "introduced": "0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "1.2.3",
+          "introduced": "1.0.0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "express",
+      "installedAs": [],
+      "directAs": [
+        "express"
+      ],
+      "installedVersion": "4.17.1",
+      "scope": "runtime",
+      "isDirect": true,
+      "directParents": [],
+      "advisoryId": "GHSA-qw6h-vgh9-j6wx",
+      "severity": "low",
+      "isMalicious": false,
+      "title": "express vulnerable to XSS via response.redirect()",
+      "candidateVersion": "4.20.0",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "4.20.0",
+          "introduced": "0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "5.0.0",
+          "introduced": "5.0.0-alpha.1",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "body-parser",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "1.19.0",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "express"
+      ],
+      "advisoryId": "GHSA-v422-hmwv-36x6",
+      "severity": "low",
+      "isMalicious": false,
+      "title": "body-parser vulnerable to denial of service when invalid limit value silently disables size enforcement",
+      "candidateVersion": "1.20.6",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "1.20.6",
+          "introduced": "0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "2.3.0",
+          "introduced": "2.0.0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "cookie",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "0.4.0",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "express"
+      ],
+      "advisoryId": "GHSA-pxg6-pf52-xh8x",
+      "severity": "low",
+      "isMalicious": false,
+      "title": "cookie accepts cookie name, path, and domain with out of bounds characters",
+      "candidateVersion": "0.7.0",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "0.7.0",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "qs",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "6.7.0",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "express"
+      ],
+      "advisoryId": "GHSA-w7fw-mjwx-w883",
+      "severity": "low",
+      "isMalicious": false,
+      "title": "qs's arrayLimit bypass in comma parsing allows denial of service",
+      "candidateVersion": "6.14.2",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "6.14.2",
+          "introduced": "6.7.0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "send",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "0.17.1",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "express"
+      ],
+      "advisoryId": "GHSA-m6fv-jmcg-4jfg",
+      "severity": "low",
+      "isMalicious": false,
+      "title": "send vulnerable to template injection that can lead to XSS",
+      "candidateVersion": "0.19.0",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "0.19.0",
+          "introduced": "0",
+          "lastAffected": null
+        }
+      ]
+    },
+    {
+      "ecosystem": "npm",
+      "package": "serve-static",
+      "installedAs": [],
+      "directAs": [],
+      "installedVersion": "1.14.1",
+      "scope": "runtime",
+      "isDirect": false,
+      "directParents": [
+        "express"
+      ],
+      "advisoryId": "GHSA-cm22-4g7w-348p",
+      "severity": "low",
+      "isMalicious": false,
+      "title": "serve-static vulnerable to template injection that can lead to XSS",
+      "candidateVersion": "1.16.0",
+      "fixStatus": "candidate",
+      "affectedRanges": [
+        {
+          "kind": "range",
+          "fixed": "1.16.0",
+          "introduced": "0",
+          "lastAffected": null
+        },
+        {
+          "kind": "range",
+          "fixed": "2.1.0",
+          "introduced": "2.0.0",
+          "lastAffected": null
+        }
+      ]
+    }
+  ],
+  "source": {
+    "checkedFiles": 40,
+    "eligibleFiles": 40,
+    "partial": false,
+    "rules": [
+      {
+        "ruleId": "FF-TLS-002",
+        "title": "TLS certificate verification turned off for a client",
+        "severity": "medium",
+        "matches": 2,
+        "files": 1,
+        "inTestFiles": 2
+      }
+    ]
+  }
+}

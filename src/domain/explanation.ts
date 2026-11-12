@@ -8,6 +8,8 @@ import type { Severity } from './advisory.ts';
 import type { Action } from './fix-plan.ts';
 import type { Scope } from './lockfile.ts';
 import { headline } from './report-text.ts';
+import { isTestPath } from './source-files.ts';
+import { SOURCE_RULES, type SourceCheckStatus, type SourceCounts } from './source-rules.ts';
 
 export type ExplanationSource = 'ai' | 'template';
 
@@ -41,11 +43,35 @@ export interface ActionFacts {
   headline: string;
 }
 
+/**
+ * What an explainer may know about the source checks: rules and counts only. Never file paths or code
+ * excerpts: those come from the repository and could carry instructions.
+ */
+export interface SourceRuleFacts {
+  ruleId: string;
+  title: string;
+  severity: 'high' | 'medium';
+  matches: number;
+  files: number;
+  /** Matches in test code (test/, __tests__/, *.test.*, *.spec.*). */
+  inTestFiles: number;
+}
+
+export interface SourceFacts {
+  checkedFiles: number;
+  eligibleFiles: number;
+  partial: boolean;
+  /** Rules that matched, most severe first; empty when nothing was found. */
+  rules: SourceRuleFacts[];
+}
+
 /** What a completed scan keeps. */
 export interface StoredExplanation {
   source: ExplanationSource;
   summary: string;
   actions: Record<string, { text: string; source: ExplanationSource }>;
+  /** "Why it matters" per source rule that matched (absent on older scans). */
+  sourceRules?: Record<string, { text: string; source: ExplanationSource }>;
   /** Why AI text was not used, when an AI explainer was configured (for operators and the eval; not shown). */
   fallbackReason?: string;
 }
@@ -53,17 +79,48 @@ export interface StoredExplanation {
 export interface ExplainInput {
   repo: string;
   summaryLine: string;
+  /** False when the dependency check didn't run to completion (no or unsupported lockfile, or it failed). */
+  dependenciesChecked: boolean;
   checkedDeps: number;
   totalDeps: number;
   actions: ActionFacts[];
+  /** Null when no source check result is available. */
+  source: SourceFacts | null;
 }
 
 export interface Explanation {
   summary: string;
   actions: { actionId: string; whyItMatters: string }[];
+  /** One entry per matched source rule in the input; omitted only when there are none. */
+  sourceRules?: { ruleId: string; whyItMatters: string }[];
 }
 
 export const actionId = (a: { ecosystem: string; package: string }) => `${a.ecosystem}:${a.package}`;
+
+/**
+ * What the explainers learn about a source check: per rule, counts only. Null when there is nothing to explain
+ * from it (no files, or it failed: the report says so on its own).
+ */
+export function sourceFacts(
+  check: { status: SourceCheckStatus; counts: { checked: number; eligible: number; rules?: SourceCounts['rules'] } },
+  findings: readonly { ruleId: string; path: string }[],
+): SourceFacts | null {
+  if (check.status !== 'complete' && check.status !== 'partial') return null;
+  const rules: SourceRuleFacts[] = [];
+  for (const rule of SOURCE_RULES) {
+    // Recorded counts include every match; stored findings may be only the highest-priority examples.
+    const recorded = check.counts.rules?.[rule.id];
+    const mine = findings.filter((f) => f.ruleId === rule.id);
+    const tally = recorded ?? {
+      matches: mine.length,
+      files: new Set(mine.map((f) => f.path)).size,
+      inTestFiles: mine.filter((f) => isTestPath(f.path)).length,
+    };
+    if (tally.matches === 0) continue;
+    rules.push({ ruleId: rule.id, title: rule.title, severity: rule.severity, ...tally });
+  }
+  return { checkedFiles: check.counts.checked, eligibleFiles: check.counts.eligible, partial: check.status === 'partial', rules };
+}
 
 export function explainInput(input: {
   repo: string;
@@ -71,10 +128,14 @@ export function explainInput(input: {
   checkedDeps: number;
   totalDeps: number;
   actions: readonly Action[];
+  dependenciesChecked?: boolean;
+  source?: SourceFacts | null;
 }, limit = EXPLAINED_ACTIONS): ExplainInput {
   return {
     repo: input.repo,
     summaryLine: input.summaryLine,
+    dependenciesChecked: input.dependenciesChecked ?? true,
+    source: input.source ?? null,
     checkedDeps: input.checkedDeps,
     totalDeps: input.totalDeps,
     actions: input.actions.slice(0, limit).map((a): ActionFacts => {
@@ -141,6 +202,7 @@ export function minimalExplanation(input: ExplainInput): Explanation {
   return {
     summary: 'The actions below are ordered by the ranking policy; their steps and evidence come from the scan data.',
     actions: input.actions.map((a) => ({ actionId: a.actionId, whyItMatters: 'See the steps and evidence for this package.' })),
+    sourceRules: (input.source?.rules ?? []).map((r) => ({ ruleId: r.ruleId, whyItMatters: 'See the location and next step for each match.' })),
   };
 }
 
@@ -209,6 +271,19 @@ export function checkExplanation(input: ExplainInput, out: Explanation): CheckRe
     if (facts) checkText(`action ${a.actionId}`, a.whyItMatters, MAX_WHY_CHARS, evidenceOf([facts]));
   }
   for (const id of byId.keys()) if (!seen.has(id)) problems.push(`missing action ${id}`);
+
+  // Source rules: exactly the matched ones, each text checked like any prose. They name no versions or
+  // advisories (none are evidence here), so any version-like token or advisory id is a problem.
+  const rules = new Set((input.source?.rules ?? []).map((r) => r.ruleId));
+  const seenRules = new Set<string>();
+  const noEvidence: Evidence = { versions: new Set(), ids: new Set(), names: [] };
+  for (const r of out.sourceRules ?? []) {
+    if (!rules.has(r.ruleId)) problems.push(`unknown source rule ${r.ruleId}`);
+    else if (seenRules.has(r.ruleId)) problems.push(`duplicate source rule ${r.ruleId}`);
+    seenRules.add(r.ruleId);
+    checkText(`source rule ${r.ruleId}`, r.whyItMatters, MAX_WHY_CHARS, noEvidence);
+  }
+  for (const id of rules) if (!seenRules.has(id)) problems.push(`missing source rule ${id}`);
 
   return problems.length === 0 ? { ok: true } : { ok: false, problems };
 }

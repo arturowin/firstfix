@@ -66,12 +66,6 @@ existing rows as `npm` and the unique key includes the ecosystem; all existing n
 Advisory source: OSV events → `AffectedRange` (fixed, last_affected, `introduced: 0`, versions-only entries);
 the OSV adapter passes the shared contract suite; candidate selection tests use only `AffectedRange`.
 
-## If time runs short — cut in this order
-1. Shrink `npm run eval` to 3 fixtures
-2. Visual polish beyond clear states
-3. Prompt preview (keep copy button)
-Never cut a test while keeping the claim it proves. If a guarantee isn't tested, remove it from the README.
-
 ## M3 · AI explanation
 - [x] `Explainer` port; `LlmExplainer` with timeout → zod check (structure + allowed finding IDs) → `TemplateExplainer` fallback
 - [x] Works with no `LLM_API_KEY`
@@ -171,3 +165,118 @@ OAuth state binding, expiry and one-time use; session expiry consistency (missin
 access without repository access → `404`; public repository made private while queued → no credentialed read,
 no findings; access revoked → permanent, GitHub timeouts/5xx → retried; `no-store`; logout; all existing tests
 unchanged.
+
+## M7 · JavaScript/TypeScript source checks
+Two targeted, heuristic checks for disabled TLS certificate verification in `.js`, `.jsx`, `.ts` and `.tsx` files:
+`FF-TLS-001` (process-wide `NODE_TLS_REJECT_UNAUTHORIZED = '0'`) and `FF-TLS-002` (`rejectUnauthorized: false`).
+They run in the existing worker and `scan` job after the dependency check, on the same commit. Design:
+ARCHITECTURE.md "Source checks". Not general static analysis (SAST), and a match never claims exploitability.
+
+Out of scope: other languages or vulnerability categories, autofixes, PRs, cross-file analysis, custom rules, a
+separate worker, queue, service or external scanner, and new parsing libraries.
+
+Decisions (the proposed defaults, accepted when implementation was approved):
+- Test code (`test/`, `__tests__/`, `*.test.*`, `*.spec.*`) is scanned and labelled "test file", not excluded.
+- `FF-TLS-002` includes the member-assignment form `x.rejectUnauthorized = false`.
+- Severity: `FF-TLS-001` high, `FF-TLS-002` medium.
+- The overall status table in ARCHITECTURE.md; `unsupported` only when neither check finds anything to check.
+- Files are taken in path order under the limits.
+- AI explanations and the agent prompt are unchanged; source findings get deterministic text.
+- Changed during implementation: private files are read through the contents API at the commit SHA (proven live
+  in M6) instead of the blobs API; matches over the storage cap no longer make coverage partial (every file was
+  checked; the summary says more were found).
+
+- [x] First: verify with GitHub's docs and a real repository (record in ARCHITECTURE.md):
+      - the tree SHA from the commit response;
+      - `git/trees?recursive=1` (`truncated`, `size`, modes `120000`/`160000`) with no token, a public-only
+        token, and an installation token;
+      - `git/blobs` with the raw media type and a repository-scoped installation token, falling back to the
+        contents API at the commit SHA;
+      - raw reads at a commit SHA for public repositories.
+- [x] Slice 1 (process-wide TLS disabling, end to end):
+      - pure tokenizer and `FF-TLS-001` with exact locations;
+      - pure file selection (extensions, exclusions, limits);
+      - `RepoSource.listTree`/`readBlob` (public and private paths) and `resolveDefaultCommit` returning the
+        tree SHA;
+      - `SourceCheck` in `application/` with bounded concurrency and a time budget;
+      - migration 012 (`source_findings`, scan source and dependency status columns, stage `source`);
+      - the pipeline runs the source check after the dependency check, and a missing lockfile no longer stops
+        the scan;
+      - `complete()` writes both in its locked transaction;
+      - the report and API expose source status, coverage and findings;
+      - the UI shows a "Source checks" section with links to the lines at the commit.
+      **Gate:** a fixture repository with `process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'` gets one `FF-TLS-001`
+      finding with the right line and column, stored, shown and linked. A repository without a lockfile still
+      gets its source results.
+- [x] Slice 2:
+      - `FF-TLS-002`, both forms;
+      - failure paths a–f from the ARCHITECTURE.md status table;
+      - last-attempt handling (each check's transient error ends that check `failed`, the other's results are
+        kept);
+      - partial coverage reasons (truncated listing, limits, symlinks, submodules, fetch failures);
+      - wording for "no issues found by the supported checks" and for older scans ("not run").
+- [x] Docs: README (scope, limits and false positives/negatives), ARCHITECTURE (status from "planned" to
+      implemented), `.env.example` limits, AGENT_LOG.
+- [x] Review after first use (human): an unsupported lockfile must not read as a stopped scan; prioritizing comes
+      after the source check; source issues are explained too (template and AI; rules and counts only, never
+      paths or code). Findings are grouped by rule in the report.
+- [ ] Live private organization-repository scan (needs a human with access; see AGENT_LOG). A live public
+      scan already passed.
+**Gate:**
+- both rules end to end;
+- every case a–f tested;
+- older scans read "Source checks were not run";
+- source findings are not counted as packages or upgrades;
+- private source excerpts are covered by the existing access rules;
+- one live private organization-repository scan, recorded in AGENT_LOG separately from the mocked tests;
+- `npm run typecheck && npm run lint && npm test` green.
+Tests:
+- **Unit:**
+  - both rules: quote styles, whitespace and line breaks, numeric `0`, bracket keys, identifier and quoted
+    property keys;
+  - non-matches: `==`/`===`, ternary `a ? rejectUnauthorized : false`, other values, comments, strings,
+    templates and regex literals containing the text;
+  - multi-line statements; exact line and column, including after multi-byte characters and CRLF;
+  - excerpt bounding and redaction of other string literals;
+  - file eligibility, exclusions and limit accounting.
+- **Contract (msw):**
+  - tree and blob reads pinned to the commit and tree SHA;
+  - truncation, symlinks and submodules;
+  - public reads never carry credentials; private reads use only the scoped installation token;
+  - lost access during the source check is `app_access_revoked`.
+- **Pipeline (Postgres):**
+  - missing lockfile with a successful source check;
+  - partial source coverage;
+  - each check failing on the last attempt while the other succeeds;
+  - neither usable;
+  - no eligible files;
+  - a stale attempt writes nothing;
+  - retention deletes source findings.
+- **Report:**
+  - mixed dependency and source findings;
+  - no matches;
+  - an older scan with no source data;
+  - a private report's source section returns 404 to a viewer without access.
+- **Fixture:** `test/fixtures/source/` with flagged and safe examples (comments, strings, types, tests).
+Files expected to change:
+- **New:**
+  - `migrations/012_source_checks.sql`;
+  - `src/domain/source-scan.ts` (tokenizer and matching);
+  - `src/domain/source-rules.ts` (catalog: id, version, severity, explanation, next action);
+  - `src/domain/source-files.ts` (eligibility and selection);
+  - `src/application/source-check.ts`;
+  - `test/unit/source-scan.test.ts`, `test/unit/source-files.test.ts`;
+  - `test/contract/github-source.test.ts`;
+  - `test/integration/source-pipeline.test.ts`;
+  - `test/fixtures/source/*`.
+- **Changed:**
+  - `src/ports/repo-source.ts`, `src/adapters/github/repo-source.ts`;
+  - `src/ports/scan-repository.ts`, `src/adapters/postgres/scan-repository.ts`;
+  - `src/application/scan-pipeline.ts`, `src/application/report.ts`;
+  - `src/domain/report-text.ts`, `src/domain/agent-prompt.ts`;
+  - `src/api/app.ts`;
+  - `src/worker/main.ts` (limits);
+  - `src/web/app.ts`, `src/web/index.html`;
+  - the `RepoSource` test doubles in `test/integration/{pipeline,failures,osv-partial,malformed-strings}.test.ts`;
+  - `test/integration/migrate.test.ts`;
+  - `.env.example`, `README.md`, `docs/ARCHITECTURE.md`, `docs/AGENT_LOG.md`.

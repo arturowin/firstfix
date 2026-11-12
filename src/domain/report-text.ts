@@ -42,8 +42,12 @@ function routes(pkg: string, v: ActionVersion & { candidate: CandidateStep }, hi
   if (commands.length > 1) out.push(`Update every declaration (each is a separate install): ${list(commands)}.`);
   if (v.directParents.length > 0) {
     const lead = commands.length > 0 ? `It is also pulled in by ${list(v.directParents)}: update` : 'Update';
+    // Forcing a new major under packages built for the old one is the risky route: say so where it applies.
+    const majorOverride = v.candidate.majorJump
+      ? ` Forcing a new major version that way can break the packages that depend on ${pkg}, so run their checks too.`
+      : '';
     out.push(
-      `${lead} ${list(v.directParents)} so it resolves to ${pkg} ${v.candidate.version}, or to another version checked against these advisories; if that isn't possible, use ${hints.transitiveFix}.`,
+      `${lead} ${list(v.directParents)} so it resolves to ${pkg} ${v.candidate.version}, or to another version checked against these advisories; if that isn't possible, use ${hints.transitiveFix}.${majorOverride}`,
     );
   }
   return out;
@@ -191,7 +195,8 @@ function verify(a: Action, hints: RemediationHints): string {
     case 'remove_malicious':
       return `${inspect} shows nothing, a rescan no longer lists it, and the exposed secrets were rotated.`;
     case 'upgrade':
-      return `${inspect} shows only the candidate version, your tests pass, and a rescan confirms which advisories remain.`;
+      // Other versions of the package can legitimately stay (other majors, other dependents): check the affected ones are gone.
+      return `${inspect} no longer shows ${list(a.versions.map((v) => v.installedVersion))}, your tests pass, and a rescan confirms which advisories remain.`;
     case 'no_fix':
     case 'review':
       return `Rescan after any change, and re-check the advisory for a published fix.`;

@@ -10,6 +10,7 @@ import type { Advisory } from '../../src/domain/advisory.ts';
 import type { RepoSource } from '../../src/ports/repo-source.ts';
 import type { VulnDatabase } from '../../src/ports/vuln-database.ts';
 import { createTestEnv, type TestEnv } from '../support/env.ts';
+import { DEPENDENCIES_ONLY, NO_SOURCE_FILES, TREE_SHA } from '../support/checks.ts';
 
 const reg = (n: string) => `https://registry.npmjs.org/${n}/-/${n}-1.0.0.tgz`;
 // Built as an object and serialised, so the lockfile text carries real \u0000 and \ud800 escapes.
@@ -47,7 +48,8 @@ describe('malformed lockfile strings (review finding)', () => {
       [id],
     );
     const source: RepoSource = {
-      resolveDefaultCommit: () => Promise.resolve({ sha: 'a'.repeat(40), branch: 'main' }),
+      resolveDefaultCommit: () => Promise.resolve({ sha: 'a'.repeat(40), branch: 'main', treeSha: TREE_SHA }),
+      ...NO_SOURCE_FILES,
       readFile: (_r, _a, _s, p) => Promise.resolve(p === 'package-lock.json' ? lock : null),
     };
     const vulns: VulnDatabase = {
@@ -83,6 +85,7 @@ describe('malformed lockfile strings (review finding)', () => {
       explanation: { source: 'template', summary: 'sum\u0000mary', actions: {} },
       counts: { totalDeps: 2, checkedDeps: 1, unsupportedDeps: 1, failedLookups: 0 },
       coverage: 'full',
+      ...DEPENDENCIES_ONLY,
       findings: [
         {
           ecosystem: 'npm', package: 'good', installedAs: [], directAs: ['good'], installedVersion: '1.0.0', scope: 'runtime',
