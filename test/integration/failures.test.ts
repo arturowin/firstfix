@@ -31,7 +31,7 @@ const LOCK = JSON.stringify({
 
 const source: RepoSource = {
   resolveDefaultCommit: () => Promise.resolve({ sha: 'a'.repeat(40), branch: 'main' }),
-  readFile: (_r, _s, path) => Promise.resolve(path === 'package-lock.json' ? LOCK : null),
+  readFile: (_r, _a, _s, path) => Promise.resolve(path === 'package-lock.json' ? LOCK : null),
 };
 
 /** What the advisory source does on the next lookups; tests swap it. */

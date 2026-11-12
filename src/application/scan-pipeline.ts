@@ -89,7 +89,7 @@ export class ScanPipeline {
   }
 
   private async scan(claim: ClaimedScan, signal: AbortSignal): Promise<RunResult> {
-    const { sha } = await this.source.resolveDefaultCommit(claim.repo, signal);
+    const { sha } = await this.source.resolveDefaultCommit(claim.repo, claim.access, signal);
     if (!(await this.scans.recordProgress(claim, { commitSha: sha }))) return 'stale';
 
     const found = await this.findLockfile(claim, sha, signal);
@@ -199,7 +199,7 @@ export class ScanPipeline {
   ): Promise<{ format: LockfileFormat; path: string; text: string } | null> {
     for (const format of this.registry.formats) {
       for (const path of format.fileNames) {
-        const text = await this.source.readFile(claim.repo, sha, path, signal);
+        const text = await this.source.readFile(claim.repo, claim.access, sha, path, signal);
         if (text !== null) return { format, path, text };
       }
     }

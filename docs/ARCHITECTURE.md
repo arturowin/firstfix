@@ -1,6 +1,7 @@
 # Architecture
 
-FirstFix reviews the npm dependencies of a public GitHub repository at a specific commit. See the
+FirstFix reviews the npm dependencies of a GitHub repository at a specific commit: public repositories
+anonymously, private ones after GitHub sign-in (see [Private repositories](#private-repositories-m6)). See the
 [README](../README.md) for the product goals, setup, and demo.
 
 ## Components
@@ -16,6 +17,10 @@ create the scan and enqueue its job in one transaction.
   `Explainer`, `ScanRepository`.
 - **Adapters**: GitHub REST API, OSV.dev (the advisory source; see "Advisory source"), LLM (+ template fallback), Postgres, pg-boss.
 - Plain composition root per process; no DI framework. Contract tests show adapters are substitutable.
+- **Private repositories (M6, optional):** GitHub sign-in and a FirstFix GitHub App. The API resolves sessions
+  and repository access through `AccessService` (ports `GitHubAuth`, `SessionStore`); the worker reads private
+  repositories with a per-scan installation token through the same `RepoSource` port. See
+  [Private repositories](#private-repositories-m6).
 
 ## Project layout
 
@@ -32,6 +37,8 @@ test/              Unit, integration, and contract tests
 ```
 
 ## Data model (current: migrations 001-010)
+Migration 011 (private repositories) is described under
+[Private repositories](#private-repositories-m6).
 ```
 scans(id uuid pk,            -- also the pg-boss job id (send({ id })), same submission tx
       repo_owner, repo_name, repo_url_normalized, commit_sha null,
@@ -248,11 +255,149 @@ registered separately from the scan lifecycle, ranking, and attempt-guarded writ
 - Read the lockfile by SHA from `https://raw.githubusercontent.com/{owner}/{repo}/{sha}/{path}`, where `path`
   comes from the lockfile-format registry (the contents API won't inline files over 1 MB). Still follows the
   pinned-SHA rule.
-- Optional `GITHUB_TOKEN` (unauthenticated limit is 60 requests/hour/IP). Works without it.
+- Optional `GITHUB_TOKEN` (unauthenticated limit is 60 requests/hour/IP), used for public API calls only after
+  the worker verifies it can't read private repositories. Lockfiles of public scans are read without
+  credentials. Works without it. Private scans: see [Private repositories](#private-repositories-m6).
 - 404 → `failed`, message "repository not found or private" (GitHub returns 404 for both).
 - 403/429 with rate-limit headers (`x-ratelimit-remaining: 0`, `retry-after`) → transient, retry.
   Other 403 → unrecoverable.
 - Lockfile 404 at that SHA → `unsupported` ("no package-lock.json at the repository root").
+
+### Private repositories (M6)
+Sign-in and private scanning are on only when the GitHub App settings are configured; without them FirstFix
+behaves exactly as before (public repositories, no sign-in).
+
+**Who can use it.** Any GitHub user, including an ordinary organization member, signs in with GitHub and scans
+the repositories that **both** they and the FirstFix GitHub App can access. GitHub decides: the app must be
+installed for the repository (by its owner, or approved by an organization owner), and the user must have read
+access to it (owner, collaborator or through organization membership). Being an organization member, or having
+access to an installation, is not enough on its own. FirstFix keeps no organizations, memberships, invitations
+or roles.
+
+**Flow.**
+1. **Sign in** (`/auth/login` → GitHub → `/auth/callback`): OAuth for the GitHub App's user tokens with `state`
+   and PKCE (S256). The state is stored server-side (`oauth_states`), bound to the browser by a random nonce in
+   a short-lived `__Host-firstfix_oauth` cookie (only its hash is stored), expires after 10 minutes and is
+   consumed exactly once (`DELETE … RETURNING`). The only accepted return paths are `/` and `/scans/<uuid>`.
+2. **Discover installations**: `GET /user/installations` with the user's token (all pages) lists the app's
+   installations the user can access, including organization installations installed by someone else.
+3. **Connect GitHub** (when needed): `/github/connect` sends the user to the app's install page. GitHub's
+   setup-URL redirect carries an `installation_id`; it is trusted only if that id is among the user's
+   installations, fetched fresh (GitHub warns the parameter can be spoofed). A member who can't install the
+   app can request it from an organization owner; GitHub's docs don't describe the redirect for a request, so
+   FirstFix tracks no pending state. A return without a verifiable installation shows a truthful message: if
+   approval was requested, an owner must approve it on GitHub, and the organization appears here once approved.
+4. **Pick a repository**: `GET /user/installations/{id}/repositories` (all pages, 100 per page) lists the
+   repositories both the user and the app can access, labelled by owner, with their visibility.
+5. **Scan**: the picked repository is submitted like any URL. For a signed-in user the API looks it up among
+   the repositories of the installation for its owner; a private match becomes a private scan bound to that
+   repository id and installation id. Everything else is a public scan, exactly as before.
+
+**Repository identity.** A private scan is bound to the GitHub repository id and installation id recorded at
+submit, never to `owner/name`. A rename or transfer keeps the id; the worker and every access check use the
+recorded ids.
+
+**Who can view a scan.**
+- Public-repository scans stay anonymous and link-shareable.
+- A private-repository scan is visible only to a signed-in user whose repository list for the recorded
+  installation contains the recorded repository id. The rule is pure (`src/domain/access.ts`); the GitHub
+  answer is its input.
+- The check runs on submit and on every status and report read.
+
+| Request for a scan that is… | No session cookie | Expired or unknown session | Active session |
+|---|---|---|---|
+| public | 200 | 200 | 200 |
+| private, viewer has access | 404 | 401 `session_expired` | 200 |
+| private, no access | 404 | 401 `session_expired` | 404 |
+| missing | 404 | 401 `session_expired` | 404 |
+
+So without a valid session, missing and private scans look the same.
+
+**Sessions and the access cache.**
+- A session lasts until its user token expires (8 hours, the GitHub default; capped at 8 hours if the app
+  issues non-expiring tokens). Refresh tokens aren't stored. Session expiry is checked before any access
+  check, cached or fresh.
+- The user's installations, and each installation's repository list, are cached in memory per API instance,
+  keyed by session (and installation), for a fixed 5 minutes from GitHub's answer. An expired entry is never
+  reused; the cache is bounded in size.
+- GitHub rejects the user token (`401`) → the session is deleted, its cache entries dropped, the client gets
+  `401 session_expired`.
+- GitHub unavailable (timeout, `5xx`, rate limit) and no live cache entry → `503 github_unavailable`; an outage
+  never extends an earlier decision. Each check has its own deadline; when it expires, that is also
+  "GitHub unavailable" (`503`, or `?auth_error=github_unavailable` during sign-in), never a server error or
+  "no access".
+- Logout deletes the session and its cache entries. Going to **Connect GitHub**, and returning through the
+  setup URL, drop the session's cached lists too (GitHub may not redirect back after an access change), so
+  the next look is fresh.
+- Request logs record the path only, never the query string (the OAuth callback carries the code and state).
+
+**Two kinds of token, kept apart.**
+- The user's token stays in the API: AES-256-GCM encrypted at rest in `sessions` (key derived from
+  `SESSION_SECRET`), used only for installation and repository listings, never in logs, responses, job
+  payloads or the worker.
+- The worker creates its own installation token per scan with the app's private key (RS256 JWT via
+  `node:crypto`, `iss` = client id, `iat` 60 s in the past, 9-minute expiry), scoped with `repository_ids` to
+  the recorded repository and `permissions: { contents: read, metadata: read }`, cached until 5 minutes
+  before it expires. The job still carries only the scan id.
+
+**Private pipeline path.** `RepoSource` takes an `access` argument: `public`, or `installation` (installation id
+and repository id). For a private scan the worker mints the scoped token, lists `GET /installation/repositories`
+(which can only contain that repository) and requires the recorded id, then resolves the default branch and
+reads the lockfile through the contents API (`application/vnd.github.raw+json`) at the pinned SHA. Domain,
+ranking and report are unchanged.
+
+**Public and private paths never mix.**
+- Visibility is fixed at submit and never changes for that scan, through retries and completion. A private
+  scan stays private even if the repository later becomes public.
+- A public scan never uses installation or user credentials, and its lockfile is always read without
+  credentials.
+- `GITHUB_TOKEN` (optional, for API rate limits) is used only if the worker verifies at startup that it
+  can't read private repositories: a classic token with the `repo` scope, or any token that lists a private
+  repository (`GET /user/repos?visibility=private`), is refused and the worker runs unauthenticated (logged).
+- Every public attempt re-reads repository metadata without private access. A repository that became private
+  (or is gone) answers `404`, and the scan ends permanently `failed` (`repo_not_found`) with no findings.
+
+**Failures.**
+- Submit: GitHub unavailable during the lookup → `503` (resending with the same Idempotency-Key is safe);
+  expired session → `401`.
+- Worker, private path: installation gone or suspended, or the repository no longer in it (`404`, `422`,
+  `403` without rate-limit headers when minting, or an empty repository list) → permanent `failed`
+  `app_access_revoked`; app credentials rejected (`401`) → permanent `failed` `github_app_auth`; app not
+  configured in the worker → permanent `failed` `github_app_not_configured`. Timeouts, `5xx` and rate limits
+  stay transient and are retried.
+- A private file that answers `404` counts as missing only after the scoped listing confirms the repository is
+  still accessible; otherwise it is `app_access_revoked`, never "no supported lockfile".
+
+**Browser behaviour.**
+- On `401` while following or viewing a scan, the page stops polling and offers "Sign in again to continue",
+  returning to the same scan afterwards. On `404` it stops polling; when signed out it adds "If this is a
+  private scan, sign in to view it". Neither is retried.
+- Logout stops polling, clears any rendered results and returns to the start page.
+
+**Responses.** `Cache-Control: no-store` on scan status and reports, `/me`, the repository picker, `/auth/*`
+and `/github/*`; session-dependent answers also send `Vary: Cookie`. Session-authenticated POSTs must carry
+an `Origin` equal to `PUBLIC_URL`'s origin (`403 bad_origin` otherwise); cookie-less API clients are unaffected.
+
+**Data handling.** OSV receives package names and versions only, never code, as for public repositories.
+AI explanations work as for public repositories: when `LLM_API_KEY` is set, the LLM provider receives the same
+facts (the repository name and the report's structured findings: package names, versions, advisory ids),
+never code.
+
+**Data model (migration 011).** `scans.visibility` (`'public'` default), `github_repo_id`, `installation_id`,
+`submitted_by` (a private scan must have both ids); `sessions(key_hash pk, github_user_id, github_login,
+token_encrypted, expires_at, created_at)`; `oauth_states(state_hash pk, binding_hash, verifier_encrypted,
+return_to, expires_at)`. Expired sessions and states are removed by the retention job. The idempotency request
+hash includes the signed-in user, so the same key from another user gets `409`.
+
+**Cookies and configuration.** Cookies are parsed and set with `@fastify/cookie`. The session cookie is
+`__Host-firstfix_session`: HttpOnly, Secure, SameSite=Lax, Path=/. Settings: API: `GITHUB_APP_CLIENT_ID`,
+`GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_SLUG`, `SESSION_SECRET`, `PUBLIC_URL` (https, or http on localhost);
+worker: `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_PRIVATE_KEY`. Partly configured → the process refuses to start.
+
+**Known limits.** No webhooks and no refresh tokens: users sign in again after at most 8 hours; revoked access
+can still allow views for up to 5 minutes (the cache lifetime); a removed installation is noticed at the next
+use. A repository list longer than 10,000 entries per installation is cut off (and reported as truncated);
+repositories beyond it can't be picked or viewed through FirstFix.
 
 ### Lockfile parsing rules
 - Only `packages` keys containing a `node_modules/` segment are dependencies; the package name is the part
@@ -465,6 +610,21 @@ Never says "secure". Partial clean is never shown as clean overall.
 | `GET /` | Serves the web UI. |
 | `GET /health/live` | Checks that the API responds. |
 | `GET /health/ready` | Checks database access from the API. Returns `503` when the database is unavailable. |
+
+Private repositories (M6, only when the GitHub App is configured). Session-dependent answers send
+`Cache-Control: no-store` and `Vary: Cookie`.
+
+| Endpoint | Behavior |
+|---|---|
+| `GET /me` | `{ signInEnabled, session: 'none' \| 'expired' \| 'active', user, installations, installUrl }`; installations only for an active session. `503` when GitHub is unavailable. |
+| `GET /auth/login` | Stores a one-time state, sets the browser-binding cookie, redirects to GitHub (state + PKCE). Optional `return_to`: `/` or `/scans/<uuid>`. |
+| `GET /auth/callback` | Consumes the state (same browser, unexpired, once), exchanges the code with the PKCE verifier, creates the session, redirects to `return_to`. Failures redirect to `/?auth_error=<code>`. |
+| `POST /auth/logout` | Deletes the session and its cached access; clears the cookie. `204`. |
+| `GET /github/connect` | Redirects to the app's install page (to sign-in first when there is no session). |
+| `GET /github/setup` | GitHub's setup URL. Redirects to `/?connect=installed` only if `installation_id` is among the user's installations (fetched fresh), otherwise to `/?connect=unverified`. |
+| `GET /installations/:id/repos` | Repositories both the user and the app can access through that installation, all pages: `{ repositories: [{ id, owner, name, fullName, private }], truncated }`. `401` without an active session, `404` if the installation isn't the user's. |
+| `POST /scans` (changed) | Signed in and the repository is a private one the user can access through the owner's installation → private scan bound to its ids. Otherwise a public scan, as before. `401 session_expired` with an expired session; `503` when GitHub is unavailable. |
+| `GET /scans/:id`, `GET /scans/:id/report` (changed) | Private scans follow the table under [Private repositories](#private-repositories-m6). Scan JSON gains `visibility`. |
 
 ## Operations
 

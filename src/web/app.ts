@@ -1,3 +1,4 @@
+import { groupByOwner, noticeFromQuery, signInHref, type MeJson, type RepoJson } from './account.ts';
 import { SubmissionFlow } from './submission.ts';
 
 // Submit, follow progress, and show the report in the frozen layout (docs/ARCHITECTURE.md "Report layout"):
@@ -12,6 +13,7 @@ type FixStatus = 'candidate' | 'no_fix' | 'unknown';
 interface ScanJson {
   id: string;
   repo: { url: string };
+  visibility?: 'public' | 'private';
   commitSha: string | null;
   lockfilePath: string | null;
   advisorySource: string | null;
@@ -95,6 +97,8 @@ const input = byId('repo-url') as HTMLInputElement;
 const button = byId('submit') as HTMLButtonElement;
 const formError = byId('form-error');
 const result = byId('result');
+const authBox = byId('auth');
+const picker = byId('picker');
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -139,6 +143,11 @@ const submissions = new SubmissionFlow(
   () => crypto.randomUUID(),
 );
 
+// A held-down Enter repeats; only the first press may submit (a repeat would fire a burst of requests).
+form.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && event.repeat) event.preventDefault();
+});
+
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   void submit(input.value.trim());
@@ -168,6 +177,7 @@ function syncButtons(): void {
 /** The one entry point for starting a scan (button click, Enter in the form, "Scan again"). */
 async function submit(repoUrl: string): Promise<void> {
   if (submissions.busy) return; // shared guard: rapid clicks and Enter can't start a second scan
+  formError.className = 'error';
   formError.textContent = '';
   const pending = submissions.submit(repoUrl);
   syncButtons(); // disabled at once, before the request returns
@@ -178,6 +188,8 @@ async function submit(repoUrl: string): Promise<void> {
     void follow(outcome.scanId);
   } else if (outcome.kind === 'error') {
     formError.textContent = outcome.message;
+    // The session ended (the server has dropped its cookie): show "Sign in" again; the next scan is anonymous.
+    if (outcome.status === 401) void loadMe();
   }
 }
 
@@ -201,9 +213,10 @@ async function follow(scanId: string): Promise<void> {
     try {
       const res = await api(`/scans/${scanId}`);
       if (following !== scanId) return;
-      if (res.status === 404) {
+      if (res.status === 401 || res.status === 404) {
+        // Not retried: only signing in (again) can change the answer.
         settle(scanId);
-        renderMessage('Scan not found.');
+        await renderAccessProblem(scanId, res.status);
         return;
       }
       if (res.status !== 200) {
@@ -246,8 +259,8 @@ async function showReport(scanId: string): Promise<void> {
         renderReport(res.body as ReportJson);
         return;
       }
-      if (res.status === 404) {
-        renderMessage('Scan not found.');
+      if (res.status === 401 || res.status === 404) {
+        await renderAccessProblem(scanId, res.status);
         return;
       }
       problem = `the server answered ${String(res.status)}`;
@@ -289,6 +302,7 @@ function repoTitle(scan: ScanJson): HTMLElement {
   const title = el('div', undefined, 'repo');
   const a = link(scan.repo.url, scan.repo.url);
   title.append(a);
+  if (scan.visibility === 'private') title.append(' ', el('span', 'Private', 'tag private-tag'));
   if (scan.commitSha) title.append(' at commit ', el('code', scan.commitSha.slice(0, 7)));
   return title;
 }
@@ -683,6 +697,175 @@ function renderReport(report: ReportJson): void {
   result.replaceChildren(...nodes);
 }
 
+// --- GitHub sign-in, installations and the repository picker -------------------------------------------
+
+let me: MeJson | null = null;
+
+/** 401: the session expired; 404: missing, or private and not visible to this viewer. Never polled again. */
+async function renderAccessProblem(scanId: string, status: number): Promise<void> {
+  // Whether to offer sign-in depends on /me: wait for it, then render only if this scan is still on screen.
+  if (me === null || status === 401) await loadMe();
+  if (following !== scanId) return;
+  const box = el('div', undefined, 'card');
+  const signIn = me?.signInEnabled === true;
+  if (status === 401) {
+    box.append(el('p', 'Your session has expired. Sign in again to continue.', 'strong'));
+  } else {
+    box.append(el('p', 'Scan not found.', 'strong'));
+    if (signIn && me?.session !== 'active') box.append(el('p', 'If this is a private scan, sign in to view it.', 'muted'));
+  }
+  if (signIn && (status === 401 || me?.session !== 'active')) {
+    const a = el('a', 'Sign in with GitHub', 'button-link');
+    a.href = signInHref(location.pathname);
+    const row = el('div', undefined, 'row');
+    row.append(a);
+    box.append(row);
+  }
+  result.replaceChildren(box);
+}
+
+async function loadMe(): Promise<void> {
+  try {
+    const res = await api('/me');
+    me = res.status === 200 ? (res.body as MeJson) : me;
+  } catch {
+    // Keep whatever we had; the page still works for public scans.
+  }
+  renderAuth();
+  renderPicker();
+}
+
+function renderAuth(): void {
+  authBox.replaceChildren();
+  document.body.classList.toggle('signed-in', me?.session === 'active');
+  if (!me?.signInEnabled) return;
+  if (me.session === 'active' && me.user) {
+    const out = el('button', 'Sign out', 'secondary small');
+    out.type = 'button';
+    out.addEventListener('click', () => void signOut());
+    authBox.append(el('span', `@${me.user.login}`, 'muted'), out);
+  } else {
+    const a = el('a', 'Sign in with GitHub', 'button-link small');
+    a.href = signInHref(location.pathname);
+    authBox.append(a);
+  }
+}
+
+/** Logout ends the session, stops following any scan and removes everything rendered for it. */
+async function signOut(): Promise<void> {
+  following = null;
+  submissions.unfollow();
+  result.replaceChildren();
+  picker.replaceChildren();
+  document.body.classList.remove('has-scan');
+  input.value = '';
+  history.pushState(null, '', '/');
+  syncButtons();
+  try {
+    await api('/auth/logout', { method: 'POST' });
+  } catch {
+    // The cookie may still be set; the next page load will show the real state.
+  }
+  me = me ? { ...me, session: 'none', user: null, installations: null } : null;
+  await loadMe();
+}
+
+/**
+ * Signed in: one dropdown of every repository both the user and the app can access, grouped by owner, right
+ * under the URL field. Picking one fills the field; the same "Scan repository" button starts the scan.
+ */
+function renderPicker(): void {
+  picker.replaceChildren();
+  if (!me?.signInEnabled || me.session !== 'active') return;
+  const installations = me.installations;
+
+  if (installations === null) {
+    picker.append(el('p', 'GitHub did not answer, so your repositories could not be listed. Reload to try again.', 'picker-note'));
+    return;
+  }
+  if (installations.length === 0) {
+    const cta = el('div', undefined, 'picker-cta');
+    const text = el('div');
+    text.append(el('strong', 'Scan private repositories'), el('span', 'Install the FirstFix app on your account or organization. Members can request it from an owner.'));
+    const connect = el('a', 'Connect GitHub', 'picker-button');
+    connect.href = '/github/connect';
+    cta.append(text, connect);
+    picker.append(cta);
+    return;
+  }
+
+  const row = el('div', undefined, 'picker-row');
+  const select = el('select');
+  select.id = 'repo-select';
+  select.setAttribute('aria-label', 'Choose one of your repositories');
+  select.disabled = true;
+  const placeholder = el('option', 'Loading your repositories…');
+  placeholder.value = '';
+  placeholder.selected = true;
+  placeholder.disabled = true;
+  select.append(placeholder);
+  row.append(el('span', 'or', 'picker-or'), select);
+
+  const meta = el('div', undefined, 'picker-meta');
+  const accounts = el('span', undefined, 'picker-accounts');
+  accounts.append(el('span', 'Connected:', 'picker-label'));
+  for (const inst of installations) accounts.append(el('span', inst.account, 'picker-chip'));
+  const manage = el('a', 'Manage access');
+  manage.href = '/github/connect';
+  meta.append(accounts, manage);
+  const note = el('p', undefined, 'picker-note');
+  picker.append(row, meta, note);
+
+  select.addEventListener('change', () => {
+    if (!select.value) return;
+    input.value = `https://github.com/${select.value}`;
+    formError.textContent = '';
+    button.focus();
+  });
+
+  void (async () => {
+    const results = await Promise.all(
+      installations.map(async (inst) => {
+        try {
+          return await api(`/installations/${String(inst.id)}/repos`);
+        } catch {
+          return { status: 0, body: null };
+        }
+      }),
+    );
+    if (results.some((r) => r.status === 401)) {
+      void loadMe(); // session expired: the header switches back to "Sign in with GitHub"
+      return;
+    }
+    const ok = results.filter((r) => r.status === 200).map((r) => r.body as { repositories: RepoJson[]; truncated: boolean });
+    const repos = ok.flatMap((r) => r.repositories);
+    for (const [owner, list] of groupByOwner(repos)) {
+      const group = el('optgroup');
+      group.label = owner;
+      for (const r of list) {
+        const option = el('option', r.private ? `${r.name}  ·  private` : r.name);
+        option.value = r.fullName;
+        group.append(option);
+      }
+      select.append(group);
+    }
+    placeholder.textContent = repos.length > 0 ? `Choose a repository (${String(repos.length)})` : 'No repositories yet: use Manage access to add some';
+    select.disabled = repos.length === 0;
+    const problems: string[] = [];
+    if (ok.length < results.length) problems.push('Some repositories could not be loaded; reload to try again.');
+    if (ok.some((r) => r.truncated)) problems.push('Only the first 10,000 repositories per account are listed.');
+    note.textContent = problems.join(' ');
+  })();
+}
+
+function showQueryNotice(): void {
+  const notice = noticeFromQuery(location.search);
+  if (!notice) return;
+  history.replaceState(null, '', location.pathname);
+  formError.className = notice.error ? 'error' : 'notice';
+  formError.textContent = notice.text;
+}
+
 function route(): void {
   const match = SCAN_PATH.exec(location.pathname);
   if (match?.[1]) {
@@ -697,4 +880,6 @@ function route(): void {
 }
 
 window.addEventListener('popstate', route);
+showQueryNotice();
 route();
+void loadMe();

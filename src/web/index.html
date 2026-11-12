@@ -162,6 +162,52 @@
       pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); max-height: 420px; overflow: auto; }
       .notes { padding-left: 20px; }
 
+      /* Sign-in and repository picker */
+      .auth { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+      button.small, a.small { padding: 6px 12px; font-size: 13.5px; }
+      a.button-link { display: inline-block; padding: 10px 16px; border-radius: 10px; background: #0b1530; color: #fff; font-weight: 600; text-decoration: none; }
+      a.button-link.small { padding: 6px 12px; }
+      @media (prefers-color-scheme: dark) { a.button-link { background: var(--violet); } }
+      .private-tag { background: var(--ink); }
+      @media (prefers-color-scheme: dark) { .private-tag { background: var(--muted); } }
+      .hero .notice:not(:empty) { display: inline-block; margin-top: 12px; padding: 6px 12px; border-radius: 8px; background: #fff; color: #0b1530; font-weight: 550; }
+
+      /* Repository picker (signed in), inside the hero */
+      body.signed-in .signed-out-only { display: none; }
+      .picker:empty { display: none; }
+      .picker { max-width: 720px; margin-top: 12px; }
+      .picker-row { display: flex; align-items: center; gap: 10px; }
+      .picker-or { color: rgba(255, 255, 255, 0.85); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+      .picker select {
+        flex: 1 1 auto; min-width: 0; padding: 13px 44px 13px 16px; font: inherit; font-size: 15.5px; color: #0b1530;
+        background: rgba(255, 255, 255, 0.94) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%230b1530' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 16px center;
+        border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 12px; appearance: none; -webkit-appearance: none; cursor: pointer;
+        box-shadow: 0 2px 10px rgba(20, 20, 80, 0.12); transition: box-shadow 0.15s, background-color 0.15s;
+      }
+      .picker select:hover:not(:disabled) { background-color: #fff; box-shadow: 0 4px 16px rgba(20, 20, 80, 0.18); }
+      .picker select:focus { outline: 3px solid var(--lime); outline-offset: 1px; }
+      .picker select:disabled { cursor: default; color: #5b6478; }
+      .picker-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 13px; }
+      .picker-accounts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+      .picker-label { color: rgba(255, 255, 255, 0.8); }
+      .picker-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.18); border: 1px solid rgba(255, 255, 255, 0.35); color: #fff; font-weight: 600; }
+      .picker-chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--lime); }
+      .picker-meta a { color: #fff; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgba(255, 255, 255, 0.5); }
+      .picker-meta a:hover { text-decoration-color: #fff; }
+      .picker-note:empty { display: none; }
+      .picker-note { margin: 8px 0 0; color: rgba(255, 255, 255, 0.9); font-size: 13px; }
+      .picker-cta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-radius: 14px; background: rgba(255, 255, 255, 0.16); border: 1px solid rgba(255, 255, 255, 0.35); }
+      .picker-cta div { display: flex; flex-direction: column; gap: 2px; color: #fff; font-size: 14px; }
+      .picker-cta strong { font-size: 15px; }
+      .picker-cta span { color: rgba(255, 255, 255, 0.88); }
+      a.picker-button { padding: 10px 16px; border-radius: 10px; background: #fff; color: #0b1530; font-weight: 650; text-decoration: none; white-space: nowrap; }
+      a.picker-button:hover { background: var(--lime); }
+      body.has-scan .picker-meta, body.has-scan .picker-cta span { display: none; }
+      @media (max-width: 640px) {
+        .picker-row { flex-direction: column; align-items: stretch; gap: 6px; }
+        .picker-or { align-self: center; }
+      }
+
       @media (max-width: 640px) {
         .hero { padding: 32px 20px 26px; border-radius: 22px; }
         body.has-scan .hero { padding: 20px; }
@@ -174,17 +220,19 @@
     <header class="topbar">
       <div class="wrap">
         <a class="brand" href="/"><span class="mark" aria-hidden="true"></span>FirstFix</a>
+        <div id="auth" class="auth"></div>
       </div>
     </header>
     <main class="wrap">
       <section class="hero">
         <h1>Know what to fix <span class="accent">first</span>.</h1>
-        <p class="sub">Paste a public GitHub repository URL to check its npm dependencies for known vulnerabilities, ranked, explained, with how to verify each step.</p>
+        <p class="sub">Paste a GitHub repository URL to check its npm dependencies for known vulnerabilities, ranked, explained, with how to verify each step. <span class="signed-out-only">Public repositories need no account; sign in with GitHub for private ones.</span></p>
         <form id="scan-form" novalidate>
           <input id="repo-url" name="repoUrl" type="text" inputmode="url" autocomplete="off"
                  placeholder="https://github.com/owner/repo" aria-label="GitHub repository URL" required />
           <button id="submit" type="submit">Scan repository</button>
         </form>
+        <div id="picker" class="picker"></div>
         <div id="form-error" class="error" role="alert"></div>
         <p class="hero-note">
           <span class="chip">npm dependency scan</span>

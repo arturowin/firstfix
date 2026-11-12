@@ -48,7 +48,7 @@ describe('malformed lockfile strings (review finding)', () => {
     );
     const source: RepoSource = {
       resolveDefaultCommit: () => Promise.resolve({ sha: 'a'.repeat(40), branch: 'main' }),
-      readFile: (_r, _s, p) => Promise.resolve(p === 'package-lock.json' ? lock : null),
+      readFile: (_r, _a, _s, p) => Promise.resolve(p === 'package-lock.json' ? lock : null),
     };
     const vulns: VulnDatabase = {
       source: { name: 'Test advisories', url: 'https://advisories.test' },

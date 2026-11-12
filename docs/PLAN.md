@@ -126,3 +126,48 @@ Found by external reviews after M5; each fix has a regression test (details in A
 - [x] `npm run eval` with an LLM key
 - [x] Dependency audit: runtime dependencies clean; 10 moderate findings remain in the dev-only lint toolchain
       (one minimatch advisory via eslint/typescript-eslint; npm's suggested fix is a breaking downgrade)
+
+## M6 · Private repositories
+GitHub sign-in plus a FirstFix GitHub App, so a user (including an ordinary organization member) can scan
+private repositories that both they and the app can access. GitHub is the source of permissions. Design:
+ARCHITECTURE.md "Private repositories". Anonymous public scans are unchanged; without the app settings the
+feature is off.
+
+Decisions:
+- A private scan is visible only to a signed-in user who can access its recorded repository id through its
+  recorded installation, per GitHub. Installation access or organization membership alone is not enough.
+- Anonymous public-repository scans stay; the public path never uses credentials that can read private content.
+- The repository picker is required.
+- No refresh tokens, no webhooks, no pending-approval tracking (GitHub doesn't document the request redirect).
+- AI explanations work for private repositories as for public ones.
+- New dependency `@fastify/cookie`. App JWTs use `node:crypto` (no Octokit).
+
+- [x] Verify GitHub's documented behavior (official docs; a real test app is still needed, see AGENT_LOG):
+      user tokens (PKCE S256, 8-hour expiry, user ∩ app access), `GET /user/installations` and
+      `GET /user/installations/{id}/repositories` (explicit permission incl. organization membership, 100 per
+      page), setup URL (`installation_id` only; must be verified), installation tokens (`repository_ids`,
+      `permissions`, 1-hour expiry, 404/422/403), JWT (RS256, `iss` client id, ≤10 minutes), contents API raw
+      media type (≤100 MB)
+- [x] Migration `011_private_repos.sql`: scan visibility and ids; `sessions`; `oauth_states`
+- [x] Ports: `RepoSource` takes `access`; new `GitHubAuth` and `SessionStore`
+- [x] Domain: scan read gate, return-path validation
+- [x] Application: `AccessService` (sessions, OAuth start/finish, installations, repository picker, submit
+      lookup, scan read checks) with a bounded 5-minute cache
+- [x] Adapters: Postgres session store (AES-256-GCM, one-time OAuth states); GitHub user auth (pagination);
+      GitHub App tokens (JWT, scoped installation tokens, cache); repo source private path (contents API) and
+      public path (no credentials for lockfiles); public-only `GITHUB_TOKEN` verification
+- [x] API: `/auth/login`, `/auth/callback`, `/auth/logout`, `/me`, `/github/connect`, `/github/setup`,
+      `/installations/:id/repos`; private submit; scan read rules; `no-store`; `Origin` check
+- [x] Worker: access from the claimed scan; app tokens; token verification; session and state retention
+- [x] UI: sign in/out, installations and Connect GitHub, repository picker grouped by owner, "Private" badge,
+      `401`/`404` handling without retry loops, logout clears results
+- [x] Setup docs (README, `.env.example`, Compose) and AGENT_LOG
+**Gate:** an organization member scans a private organization repository through an existing installation;
+a second account without access to it gets `404` for the scan status and report; public scans unchanged.
+Status: covered by mocked tests (GitHub mocked, everything else real); a live run with a real GitHub App
+and two accounts is still to do (see AGENT_LOG).
+Tests: gate and return paths; encryption; JWT; cache expiry and invalidation; pagination beyond the first page;
+OAuth state binding, expiry and one-time use; session expiry consistency (missing vs inaccessible); installation
+access without repository access → `404`; public repository made private while queued → no credentialed read,
+no findings; access revoked → permanent, GitHub timeouts/5xx → retried; `no-store`; logout; all existing tests
+unchanged.

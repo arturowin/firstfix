@@ -241,3 +241,93 @@ One entry per milestone (or per notable session). Keep it factual.
 
 ### 2026-11-11 · Live eval
 - **Verified by:** `npm run eval` with a real `LLM_API_KEY` (run by me): passed.
+
+### 2026-11-11 · M6 private repositories
+- **Human decided:** GitHub sign-in plus a GitHub App, with GitHub as the only source of permissions. An
+  ordinary organization member can use an existing installation; membership or installation access alone
+  is not enough. Anonymous public scans stay. The repository picker is required. AI explanations work as
+  for public scans. `@fastify/cookie` approved. No webhooks, refresh tokens, onboarding or roles.
+- **Human corrected (review of the M6 plan):**
+  - bind access to the recorded repository id and installation id, not `owner/name`;
+  - public scans must never use privileged credentials;
+  - define the cache and session-expiry rules;
+  - add connection states;
+  - add `no-store` and logout cleanup;
+  - make expired-session answers the same for missing and private scans;
+  - track pending approval only if GitHub supports it reliably.
+- **Verified in GitHub's docs (not yet with a real app):**
+  - User tokens: PKCE S256 recommended, 8-hour expiry, the user's and the app's access combined.
+  - `GET /user/installations` and `/user/installations/{id}/repositories`: explicit permission, including
+    through organization membership; 100 per page.
+  - Setup URL: only `installation_id` is documented, and it must be verified against the user's
+    installations. The redirect after an approval *request* is not documented, so FirstFix tracks no pending
+    state and shows a "check GitHub" message.
+  - Installation tokens: `repository_ids` and `permissions`, 1-hour expiry, 404/422/403 errors.
+  - App JWT: RS256, `iss` = client id, at most 10 minutes.
+  - Contents API raw media type: up to 100 MB.
+- **Agent did:**
+  - Migration 011: scan visibility and ids (fixed by a trigger), `sessions`, `oauth_states`.
+  - Pure read gate in `domain/access.ts`; `AccessService` with a bounded 5-minute cache.
+  - Postgres session store: AES-256-GCM, hashed cookie and state, one-time browser-bound state.
+  - GitHub adapters: user auth with same-origin pagination; app tokens scoped to one repository; private
+    reads by repository id through the contents API.
+  - Public path: lockfiles read without credentials, and `GITHUB_TOKEN` used only after a startup check
+    that it can't read private repositories.
+  - API routes, the `Origin` check and `no-store`.
+  - UI: sign-in, installations, picker grouped by owner, `401`/`404` handling without retry loops, logout
+    cleanup.
+  - README setup, `.env.example`, Compose.
+- **Found along the way:**
+  - A test sharing one worker across cases exposed the "access revoked while a token is cached" path. It
+    now has its own test: GitHub refuses the token, the retry mints again, and the scan fails permanently.
+  - The browser check found a race: the "sign in to view it" hint could be missing before `/me` answered.
+    The page now waits for `/me`.
+- **Verified by:**
+  - Typecheck, lint, and 549 tests (431 before).
+  - What is mocked: GitHub through msw (adapters, pipeline) and a fake `GitHubAuth` port (API rules, with
+    real PKCE hashing); Postgres, sessions, storage and the pipeline are real.
+  - A mutation check: weakening the access rule fails three tests.
+  - A browser check on a throwaway database with a dummy app (signed out, expired session, phone width).
+- **First live run (by the human, a real GitHub App, locally):** sign-in, Connect GitHub and the verified setup
+  redirect worked. It found two problems, both fixed with tests (551 tests):
+  - Repository access changed on GitHub didn't show for up to 5 minutes (cached list; GitHub didn't redirect
+    back). Connect GitHub and the setup URL now drop the session's cached lists.
+  - Fastify's request log wrote the OAuth `code` and `state` from the callback URL. Logs now keep the path
+    only.
+- **Second live finding:** after signing out, every scan answered "session expired", even public ones. A
+  `__Host-` cookie can only be deleted with `Secure` and `Path=/`, and logout deleted it without them, so
+  browsers kept the dead cookie. Now every deletion repeats the cookie's attributes. A dead cookie is also
+  dropped wherever FirstFix notices it (`/me`, submit, reads), and a held-down Enter no longer fires a
+  burst of submits. The tests check the `Set-Cookie` headers (554 tests); the old deletion fails them.
+- **Still to verify live:** a private scan end to end, and a second account without access. Needed:
+  - a GitHub App configured as in the README, installed on a test organization with a private repository
+    that has a root `package-lock.json`;
+  - two GitHub accounts: a member with access to that repository and a member without it;
+  - the settings in `.env`.
+  - Then check: sign in as the member, pick the repository, scan, read the report; the second account gets
+    `404`; requesting the app as a non-owner shows the "check GitHub" message.
+
+### 2026-11-12 · M6 review fixes
+- **Human (review) found, both reproduced:**
+  - A GitHub call that hit the access check's own deadline surfaced as a raw `TimeoutError`, so the API
+    answered 500 instead of 503, and sign-in could skip the friendly error page.
+  - On the private path, a lockfile `404` after access was revoked mid-scan was read as "file absent", so
+    the scan could end `unsupported` with "no supported lockfile".
+- **Agent did:**
+  - An expired deadline now becomes "GitHub unavailable" at the `AccessService` boundary, including the code
+    exchange and user lookup.
+  - A private-file `404` is checked against the installation token's repository list first: missing only
+    if the repository is still accessible, otherwise `app_access_revoked`.
+- **Verified by:**
+  - Typecheck, lint, and 563 tests including the Postgres suite.
+  - The new tests let a real deadline expire (msw handlers that never answer) and revoke access between the
+    commit and the lockfile, both in the adapter and through the pipeline.
+  - Undoing either fix fails its tests (5 and 3).
+- **Live so far (by the human, real GitHub App, local):**
+  - private scans completed for `arturowin/glamping-hub` and `arturowin/greenhouse-bot`;
+  - the same private repository scanned while signed out failed as "not found or private", with no
+    credentialed read;
+  - the `devslaw` organization installation is listed.
+- **Still required before M6 is complete:**
+  - a private scan of an **organization** repository;
+  - a second GitHub account without access getting `404` for that scan's status and report.

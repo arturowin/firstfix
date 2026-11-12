@@ -1,7 +1,6 @@
 import type pg from 'pg';
 import type { PgBoss } from 'pg-boss';
-import type { IdempotencyInput, ScanSubmission, SubmitResult } from '../../ports/scan-submission.ts';
-import type { RepoRef } from '../../domain/repo-url.ts';
+import type { IdempotencyInput, ScanSubmission, SubmitInput, SubmitResult } from '../../ports/scan-submission.ts';
 import { clientDb, SCAN_QUEUE, type ScanJobData } from '../pgboss/queue.ts';
 import { inTransactionOrRollback, Rollback } from './pool.ts';
 
@@ -29,8 +28,9 @@ export class PostgresScanSubmission implements ScanSubmission {
     this.maxOutstanding = options.maxOutstanding ?? null;
   }
 
-  async submit(input: { scanId: string; repo: RepoRef; idempotency: IdempotencyInput | null }): Promise<SubmitResult> {
+  async submit(input: SubmitInput): Promise<SubmitResult> {
     const { scanId, repo, idempotency: idem } = input;
+    const priv = input.private ?? null;
 
     const outcome = await inTransactionOrRollback<SubmitResult | null>(this.pool, async (client) => {
       if (idem) {
@@ -61,8 +61,18 @@ export class PostgresScanSubmission implements ScanSubmission {
       }
 
       await client.query(
-        `INSERT INTO scans (id, repo_owner, repo_name, repo_url_normalized) VALUES ($1, $2, $3, $4)`,
-        [scanId, repo.owner, repo.name, repo.url],
+        `INSERT INTO scans (id, repo_owner, repo_name, repo_url_normalized, visibility, github_repo_id, installation_id, submitted_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          scanId,
+          repo.owner,
+          repo.name,
+          repo.url,
+          priv ? 'private' : 'public',
+          priv?.repositoryId ?? null,
+          priv?.installationId ?? null,
+          priv?.submittedBy ?? null,
+        ],
       );
 
       const data: ScanJobData = { scanId };
