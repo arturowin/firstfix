@@ -23,7 +23,7 @@ import { createTestEnv, type TestEnv } from '../support/env.ts';
 const SHA = 'b'.repeat(40);
 const TREE = 'e'.repeat(40);
 const signal = () => new AbortController().signal;
-const flagged = readFileSync(path.join(import.meta.dirname, '..', 'fixtures', 'source', 'flagged.ts'), 'utf8');
+const flagged = readFileSync(path.join(import.meta.dirname, '..', 'fixtures', 'source', 'flagged.ts.txt'), 'utf8');
 const blob = (p: string): TreeEntry => ({ path: p, type: 'blob', mode: '100644', size: 100, sha: `s-${p}` });
 
 const LOCK = JSON.stringify({

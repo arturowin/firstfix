@@ -1,5 +1,6 @@
 import { groupByOwner, noticeFromQuery, signInHref, type MeJson, type RepoJson } from './account.ts';
 import { SubmissionFlow } from './submission.ts';
+import { sourceBadge, sourceHeadline, sourceTotals, type Tone } from './source-text.ts';
 
 // Submit, follow progress, and show the report in the frozen layout (docs/ARCHITECTURE.md "Report layout"):
 // 1. summary + date + commit + coverage + advisory source, 2. up to three next actions, 3. evidence per action,
@@ -402,7 +403,7 @@ function summaryCard(report: ReportJson): HTMLElement {
   const c = scan.counts;
   const box = el('section', undefined, 'card');
   box.append(repoTitle(scan));
-  box.append(el('p', report.summary ?? '', 'summary'));
+  box.append(el('p', `${report.summary ?? ''}${sourceHeadline(report.source)}`, 'summary'));
   // Both independent checks first, then the dependency details.
   box.append(checksOverview(report));
   box.append(statTiles(report));
@@ -677,12 +678,12 @@ function cleanCard(report: ReportJson): HTMLElement {
   const box = el('section', undefined, 'card');
   box.append(repoTitle(scan));
   if (c.totalDeps === 0) {
-    box.append(el('p', report.summary ?? 'No dependencies to check.', 'summary'));
+    box.append(el('p', `${report.summary ?? 'No dependencies to check.'}${sourceHeadline(report.source)}`, 'summary'));
   } else if (c.checkedDeps === 0 && c.failedLookups === 0) {
     // Nothing was assessed: not a clean result.
-    box.append(el('p', 'No dependencies could be checked', 'summary'));
+    box.append(el('p', `No dependencies could be checked.${sourceHeadline(report.source)}`, 'summary'));
     box.append(
-      el('p', 'Every dependency in the lockfile comes from a source advisory data does not cover (git, local files or other URLs), so no security assessment was possible. They are listed below.'),
+      el('p', 'Every dependency in the lockfile comes from a source advisory data does not cover (git, local files or other URLs), so no dependency assessment was possible. They are listed below.'),
     );
     if (report.unchecked.length > 0) box.append(uncheckedList(report));
     const row = el('div', undefined, 'row');
@@ -697,8 +698,8 @@ function cleanCard(report: ReportJson): HTMLElement {
       el(
         'p',
         scan.coverage === 'partial'
-          ? `Partial result: no known vulnerabilities in the ${String(c.checkedDeps)} of ${String(c.totalDeps)} dependencies that could be checked${at} on ${dateOf(scan)}. ${String(notChecked)} were not checked; see below.`
-          : `No known vulnerabilities in ${String(c.checkedDeps)} of ${String(c.totalDeps)} dependencies checked${at} on ${dateOf(scan)}.`,
+          ? `Partial result: no known vulnerabilities in the ${String(c.checkedDeps)} of ${String(c.totalDeps)} dependencies that could be checked${at} on ${dateOf(scan)}. ${String(notChecked)} were not checked; see below.${sourceHeadline(report.source)}`
+          : `No known vulnerabilities in ${String(c.checkedDeps)} of ${String(c.totalDeps)} dependencies checked${at} on ${dateOf(scan)}.${sourceHeadline(report.source)}`,
         'summary',
       ),
     );
@@ -766,27 +767,9 @@ function dependencyNotCheckedCard(report: ReportJson): HTMLElement {
  * Source checks, apart from dependency findings: their own summary and coverage, then each finding with its
  * location at the scanned commit, the matched code, and what to do. Never claims the code is secure.
  */
-type Tone = 'ok' | 'warn' | 'danger' | 'muted';
-
-/** Where the source check stands, as a short label and a colour. Never "secure". */
+/** Where the source check stands, as a short label and a colour (see sourceBadge). */
 function sourceState(report: ReportJson): { label: string; tone: Tone } {
-  const src = report.source;
-  if (!src || src.status === null) return { label: 'Not run', tone: 'muted' };
-  if (src.status === 'failed') return { label: 'Check failed', tone: 'danger' };
-  if (src.status === 'no_files') return { label: 'No JS/TS files', tone: 'muted' };
-  const { total: n, high: highCount } = sourceTotals(src);
-  if (n === 0) return { label: 'No issues found', tone: 'ok' };
-  const high = highCount > 0;
-  return { label: `${String(n)} ${n === 1 ? 'finding' : 'findings'}`, tone: high ? 'danger' : 'warn' };
-}
-
-/** Every match found (per-rule counts), not just the examples shown. */
-function sourceTotals(src: NonNullable<ReportJson['source']>): { total: number; high: number } {
-  if (src.rules) {
-    const total = src.rules.reduce((n, r) => n + r.matches, 0);
-    return { total, high: src.rules.filter((r) => r.severity === 'high').reduce((n, r) => n + r.matches, 0) };
-  }
-  return { total: src.findings.length, high: src.findings.filter((f) => f.severity === 'high').length };
+  return sourceBadge(report.source);
 }
 
 function dependencyState(report: ReportJson): { label: string; detail: string; tone: Tone } {

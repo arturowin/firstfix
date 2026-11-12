@@ -49,8 +49,8 @@ const options = (o: Partial<SourceCheckOptions> = {}): SourceCheckOptions => ({ 
 describe('runSourceCheck', () => {
   it('checks the fixture repository: three findings in the flagged file, none in the safe one', async () => {
     const src = repoSource([blob('src/flagged.ts'), blob('src/safe.ts'), blob('README.md')], {
-      'src/flagged.ts': fixture('flagged.ts'),
-      'src/safe.ts': fixture('safe.ts'),
+      'src/flagged.ts': fixture('flagged.ts.txt'),
+      'src/safe.ts': fixture('safe.ts.txt'),
     });
     const { check, findings } = await runSourceCheck(src, input, options(), signal());
     expect(check).toMatchObject({ status: 'complete', counts: { eligible: 2, checked: 2 } });

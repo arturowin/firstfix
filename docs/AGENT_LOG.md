@@ -450,3 +450,21 @@ One entry per milestone (or per notable session). Keep it factual.
   - Clean `npm ci`: typecheck, lint, 719 tests, eval, UI build and the Docker image all pass; `npm audit` reports 0.
   - ESLint still lints the same 126 files and still skips `dist/` and `node_modules/`; a file with a planted
     error is still reported, so the major version didn't silently change which files match.
+
+### 2026-11-12 · Report wording after scanning FirstFix itself
+- **Human asked**, after a scan of this repository: dependencies were clean, but the headline read as an all-clear
+  above three source findings, and the badge didn't say that all three are in test files.
+- **Agent changed:**
+  - **Headline.** Dependency headlines (clean, partial, with actions, nothing checkable) now add the source result
+    when it found something, e.g. "Source checks: 3 findings, all in test files." Nothing is added when the check
+    found nothing, had no files, failed or didn't run (the source card says why).
+  - **Badge.** "3 findings · all in tests" or "· 2 in tests". Severity still sets the colour.
+  - **Review follow-up.** The badge is green only for a complete check with no matches: a partial check with no
+    matches says "No findings in checked files" (warning), and a check that read no files says "No files
+    checked" (warning). When no dependency could be checked, the card now says "no dependency assessment was
+    possible" instead of "no security assessment", since the source check may still have found something.
+  - The wording lives in `src/web/source-text.ts`, which is pure and unit-tested.
+  - **Fixtures.** `test/fixtures/source/{flagged,safe}.ts` are now `.ts.txt`: tests only ever read them as text
+    and pass them to the scanner under a `.ts` path, so the insecure patterns are test data, not code in this
+    repository. The demo repository gets its own file with these patterns instead.
+- **Verified by:** typecheck, lint, 746 tests (27 new), eval, UI build.
