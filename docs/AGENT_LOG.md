@@ -468,3 +468,28 @@ One entry per milestone (or per notable session). Keep it factual.
     and pass them to the scanner under a `.ts` path, so the insecure patterns are test data, not code in this
     repository. The demo repository gets its own file with these patterns instead.
 - **Verified by:** typecheck, lint, 746 tests (27 new), eval, UI build.
+
+### 2026-11-12 · Coding-agent handoff covers source findings
+- **Human noticed** that "Hand off to a coding agent" said nothing about the source findings, and a report with
+  only source findings (clean or unchecked dependencies) had no prompt at all.
+- **Agent changed:**
+  - `buildAgentPrompt` adds a "Source findings" section: per rule, most severe first, the catalog's id, severity,
+    title and next action, and each location as a validated path and line (code outside tests first, test files
+    labelled). Two source-specific working rules: open each location first and keep verification on (trust the
+    CA instead); in test files keep the change inside the tests.
+  - Same safety rule as for dependencies: only validated, structured fields. The matched excerpt is repository
+    code and is never included; unsafe paths and lines are replaced with a note; unknown rules are counted.
+  - At most 20 locations, with a count of the rest.
+  - The report builds the prompt for any completed scan with dependency actions or source findings, and the UI
+    shows it on clean and dependencies-not-checked reports too.
+  - A dependency-only prompt is unchanged (the existing snapshot still matches).
+- **Verified by:** 8 new unit tests (including injection through a path and an excerpt), integration tests for
+  a combined and a source-only report, and a mutation check: removing the path validation fails the injection
+  test.
+- **Review follow-up:**
+  - The "more" note mixed two counts: with 100 matches found, 50 stored and 20 listed, it said "80 more are in
+    the full report" although the report has only 30 more locations. It now says "30 more source locations are in
+    the full report" and, separately, "50 more source matches were counted but not stored", with a rescan as
+    the way to find them.
+  - Reports with source findings but no dependency findings showed two "Scan again" buttons (summary card and
+    handoff card). The handoff card now has one only on the layout whose summary card has none.

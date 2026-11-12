@@ -757,6 +757,14 @@ commit, packages with evidence; candidate changes separated from facts; instruct
 graph first, keep unrelated changes, use the ecosystem's upgrade command, stop and report on major-version
 jumps, run tests, rescan, report unresolved items. User sees a preview before copying.
 
+Source findings are part of the same prompt (and give a prompt on their own when dependencies are clean or
+weren't checked): grouped by rule, most severe first, with the rule id, severity, title and next action from the
+rule catalog, and each location as a validated path and line, labelled when it is a test file. The matched
+excerpt is repository code, so it is never included; the agent opens the file. At most 20 locations. The prompt
+then says how many more locations the report lists, and separately how many matches were only counted (past the
+stored-examples limit), since no report has a location for those. Findings for a rule this version doesn't know
+are counted, not listed.
+
 ## Report layout
 1. Summary line + scan date + commit + coverage + advisory data source (coverage always beside the summary)
 2. Up to three recommended next actions: what, why first, how to verify

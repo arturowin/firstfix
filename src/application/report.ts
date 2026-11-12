@@ -83,8 +83,10 @@ export function buildReport(data: ReportData, registry: EcosystemRegistry): Repo
     ? null
     : (scan.summaryLine ?? summaryLine({ counts: scan.counts, lockfilePath: scan.lockfilePath, actions: plan }));
 
+  // The handoff covers both checks: dependency actions when that check completed, and the stored source matches.
+  const sourceCounts = scan.checks.source?.counts.rules;
   const agentPrompt =
-    depComplete && scan.commitSha
+    scan.status === 'completed' && scan.commitSha
       ? buildAgentPrompt({
           repoUrl: scan.repo.url,
           commitSha: scan.commitSha,
@@ -94,6 +96,8 @@ export function buildReport(data: ReportData, registry: EcosystemRegistry): Repo
           actions: plan,
           hintsFor: (e) => ecosystem(e)?.hints ?? null,
           schemeFor: (e) => ecosystem(e)?.versionScheme ?? null,
+          sourceFindings: data.sourceFindings,
+          ...(sourceCounts ? { sourceMatches: Object.values(sourceCounts).reduce((n, r) => n + r.matches, 0) } : {}),
         })
       : null;
 

@@ -631,8 +631,11 @@ function uncheckedList(report: ReportJson): HTMLElement {
   return box;
 }
 
-/** 5. Coding-agent prompt: preview before copy. */
-function promptSection(report: ReportJson): HTMLElement {
+/**
+ * 5. Coding-agent prompt: preview before copy. It carries "Scan again" only where the summary card has none (the
+ * report with dependency findings); the clean and dependencies-not-checked cards already have one.
+ */
+function promptSection(report: ReportJson, withScanAgain: boolean): HTMLElement {
   const section = el('section', undefined, 'card');
   section.append(el('h2', 'Hand off to a coding agent'));
   section.append(el('p', 'Built from the findings above, so it holds only scan data. Read it before you paste it.', 'muted'));
@@ -653,7 +656,8 @@ function promptSection(report: ReportJson): HTMLElement {
     );
   });
   const row = el('div', undefined, 'row');
-  row.append(copy, scanAgainButton(report.scan));
+  row.append(copy);
+  if (withScanAgain) row.append(scanAgainButton(report.scan));
   section.append(preview, row);
   return section;
 }
@@ -721,12 +725,14 @@ function cleanCard(report: ReportJson): HTMLElement {
 
 function renderReport(report: ReportJson): void {
   const source = sourceSection(report);
+  // The handoff prompt covers source findings too, so it's offered even when dependencies are clean or unchecked.
+  const prompt = (withScanAgain: boolean) => (report.agentPrompt ? [promptSection(report, withScanAgain)] : []);
   if (report.dependencyNotChecked) {
-    result.replaceChildren(dependencyNotCheckedCard(report), source);
+    result.replaceChildren(dependencyNotCheckedCard(report), source, ...prompt(false));
     return;
   }
   if (report.findings.length === 0) {
-    result.replaceChildren(cleanCard(report), source);
+    result.replaceChildren(cleanCard(report), source, ...prompt(false));
     return;
   }
   const nodes: HTMLElement[] = [summaryCard(report)];
@@ -742,8 +748,7 @@ function renderReport(report: ReportJson): void {
     for (const a of rest) more.append(actionCard(a, report.findings));
     actions.append(more);
   }
-  nodes.push(actions, findingsSection(report), source);
-  if (report.agentPrompt) nodes.push(promptSection(report));
+  nodes.push(actions, findingsSection(report), source, ...prompt(true));
   result.replaceChildren(...nodes);
 }
 
