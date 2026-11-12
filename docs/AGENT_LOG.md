@@ -435,3 +435,18 @@ One entry per milestone (or per notable session). Keep it factual.
   - Undoing the peer rule fails its test.
   - A live rescan of this repository shows the corrected card (AI text included: the Anthropic credit works
     again).
+
+### 2026-11-12 · minimatch override for the lint toolchain
+- **Human asked** for the fix FirstFix suggested on its own repository (minimatch 10.2.6, GHSA-g3hv-75wg-m249),
+  applied only if it was tested and worked.
+- **Agent checked first:**
+  - The latest eslint, @eslint/config-array, typescript-estree and typescript-eslint all still require
+    `minimatch ^10`, so no upgrade of the lint tools clears it, and `npm audit fix --force` would downgrade eslint
+    to 9.
+  - minimatch is used only by the lint tools; `npm audit --omit=dev` was already clean.
+- **Agent changed:** `package.json` `overrides.minimatch: "^11.0.1"` (resolves to 11.0.8). Remove it once the lint
+  tools depend on minimatch 11 themselves.
+- **Verified by:**
+  - Clean `npm ci`: typecheck, lint, 719 tests, eval, UI build and the Docker image all pass; `npm audit` reports 0.
+  - ESLint still lints the same 126 files and still skips `dist/` and `node_modules/`; a file with a planted
+    error is still reported, so the major version didn't silently change which files match.
