@@ -39,8 +39,10 @@ describe('migrate', () => {
     expect(rows.map((r) => r.table_name)).toEqual([
       'findings',
       'idempotency_keys',
+      'oauth_states',
       'scans',
       'schema_migrations',
+      'sessions',
       'unchecked_deps',
     ]);
   });

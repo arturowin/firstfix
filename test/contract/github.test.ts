@@ -8,6 +8,7 @@ const API = 'https://api.github.com';
 const RAW = 'https://raw.githubusercontent.com';
 const SHA = 'a'.repeat(40);
 const repo = { owner: 'owner', name: 'repo' };
+const PUBLIC = { kind: 'public' } as const;
 const signal = () => new AbortController().signal;
 
 const server = setupServer();
@@ -44,9 +45,9 @@ describe('GitHubRepoSource', () => {
     const seen = { auth: [] as (string | null)[], paths: [] as string[] };
     happyPath(seen);
     const gh = new GitHubRepoSource();
-    const commit = await gh.resolveDefaultCommit(repo, signal());
+    const commit = await gh.resolveDefaultCommit(repo, PUBLIC, signal());
     expect(commit).toEqual({ sha: SHA, branch: 'main' });
-    expect(await gh.readFile(repo, commit.sha, 'package-lock.json', signal())).toBe('{"lockfileVersion":3}');
+    expect(await gh.readFile(repo, PUBLIC, commit.sha, 'package-lock.json', signal())).toBe('{"lockfileVersion":3}');
     expect(seen.paths).toEqual([
       '/repos/owner/repo',
       '/repos/owner/repo/commits/main',
@@ -58,16 +59,16 @@ describe('GitHubRepoSource', () => {
   it('sends the token when configured', async () => {
     const seen = { auth: [] as (string | null)[], paths: [] as string[] };
     happyPath(seen);
-    await new GitHubRepoSource({ token: 't0k' }).resolveDefaultCommit(repo, signal());
+    await new GitHubRepoSource({ token: 't0k' }).resolveDefaultCommit(repo, PUBLIC, signal());
     expect(seen.auth).toEqual(['Bearer t0k']);
   });
 
   it('refuses to read at anything but a SHA (pinned-commit rule)', async () => {
-    await expect(new GitHubRepoSource().readFile(repo, 'main', 'package-lock.json', signal())).rejects.toThrow(/non-SHA/);
+    await expect(new GitHubRepoSource().readFile(repo, PUBLIC, 'main', 'package-lock.json', signal())).rejects.toThrow(/non-SHA/);
   });
 
   it.each(['../secrets', 'a//b', '/abs', './x'])('refuses an unnormalised path: %s', async (p) => {
-    await expect(new GitHubRepoSource().readFile(repo, SHA, p, signal())).rejects.toThrow(/unnormalised/);
+    await expect(new GitHubRepoSource().readFile(repo, PUBLIC, SHA, p, signal())).rejects.toThrow(/unnormalised/);
   });
 
   it('reads any root-relative path at the SHA, encoding each segment', async () => {
@@ -78,13 +79,13 @@ describe('GitHubRepoSource', () => {
         return HttpResponse.text('ok');
       }),
     );
-    expect(await new GitHubRepoSource().readFile(repo, SHA, 'sub dir/poetry.lock', signal())).toBe('ok');
+    expect(await new GitHubRepoSource().readFile(repo, PUBLIC, SHA, 'sub dir/poetry.lock', signal())).toBe('ok');
     expect(seen).toEqual([`/owner/repo/${SHA}/sub%20dir/poetry.lock`]);
   });
 
   it('no such file at that SHA → null', async () => {
     server.use(http.get(`${RAW}/owner/repo/:sha/package-lock.json`, () => new HttpResponse(null, { status: 404 })));
-    expect(await new GitHubRepoSource().readFile(repo, SHA, 'package-lock.json', signal())).toBeNull();
+    expect(await new GitHubRepoSource().readFile(repo, PUBLIC, SHA, 'package-lock.json', signal())).toBeNull();
   });
 
   it.each([
@@ -94,7 +95,7 @@ describe('GitHubRepoSource', () => {
     ['403 without rate-limit headers', () => new HttpResponse(null, { status: 403 }), 'github_error', 'failed'],
   ])('permanent: %s', async (_label, respond, code, outcome) => {
     server.use(http.get(`${API}/repos/owner/repo`, respond));
-    const err: unknown = await new GitHubRepoSource().resolveDefaultCommit(repo, signal()).catch((e: unknown) => e);
+    const err: unknown = await new GitHubRepoSource().resolveDefaultCommit(repo, PUBLIC, signal()).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PermanentError);
     expect(err).toMatchObject({ code, outcome });
   });
@@ -106,7 +107,7 @@ describe('GitHubRepoSource', () => {
         HttpResponse.json({ message: 'Git Repository is empty.' }, { status: 409 }),
       ),
     );
-    await expect(new GitHubRepoSource().resolveDefaultCommit(repo, signal())).rejects.toMatchObject({
+    await expect(new GitHubRepoSource().resolveDefaultCommit(repo, PUBLIC, signal())).rejects.toMatchObject({
       code: 'empty_repository',
       outcome: 'unsupported',
     });
@@ -120,7 +121,7 @@ describe('GitHubRepoSource', () => {
     ['network error', () => HttpResponse.error(), 'github_unreachable'],
   ])('transient: %s', async (_label, respond, code) => {
     server.use(http.get(`${API}/repos/owner/repo`, respond));
-    const err: unknown = await new GitHubRepoSource().resolveDefaultCommit(repo, signal()).catch((e: unknown) => e);
+    const err: unknown = await new GitHubRepoSource().resolveDefaultCommit(repo, PUBLIC, signal()).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(TransientError);
     expect(err).toMatchObject({ code });
   });
@@ -132,7 +133,7 @@ describe('GitHubRepoSource', () => {
         return HttpResponse.json({ default_branch: 'main' });
       }),
     );
-    await expect(new GitHubRepoSource({ timeoutMs: 50 }).resolveDefaultCommit(repo, signal())).rejects.toMatchObject({
+    await expect(new GitHubRepoSource({ timeoutMs: 50 }).resolveDefaultCommit(repo, PUBLIC, signal())).rejects.toMatchObject({
       code: 'github_timeout',
     });
   });
@@ -145,7 +146,7 @@ describe('GitHubRepoSource', () => {
       }),
     );
     const job = new AbortController();
-    const pending = new GitHubRepoSource().resolveDefaultCommit(repo, job.signal);
+    const pending = new GitHubRepoSource().resolveDefaultCommit(repo, PUBLIC, job.signal);
     job.abort(new Error('claim lost'));
     const err: unknown = await pending.catch((e: unknown) => e);
     expect(err).not.toBeInstanceOf(TransientError);
@@ -167,7 +168,7 @@ describe('GitHubRepoSource', () => {
       }),
     );
     await expect(
-      new GitHubRepoSource({ maxFileBytes: 1024 }).readFile(repo, SHA, 'package-lock.json', signal()),
+      new GitHubRepoSource({ maxFileBytes: 1024 }).readFile(repo, PUBLIC, SHA, 'package-lock.json', signal()),
     ).rejects.toMatchObject({ code: 'lockfile_too_large', outcome: 'unsupported' });
     // The endless body was cut off: only the HTTP stack's read-ahead (~64 KB) was pulled, not an unbounded amount.
     expect(pulled).toBeLessThan(1024);
@@ -176,7 +177,7 @@ describe('GitHubRepoSource', () => {
   it('refuses lockfiles over the size limit (unsupported)', async () => {
     server.use(http.get(`${RAW}/owner/repo/:sha/package-lock.json`, () => HttpResponse.text('x'.repeat(2048))));
     await expect(
-      new GitHubRepoSource({ maxFileBytes: 1024 }).readFile(repo, SHA, 'package-lock.json', signal()),
+      new GitHubRepoSource({ maxFileBytes: 1024 }).readFile(repo, PUBLIC, SHA, 'package-lock.json', signal()),
     ).rejects.toMatchObject({
       code: 'lockfile_too_large',
       message: expect.stringMatching(/^package-lock.json is larger than/) as string,

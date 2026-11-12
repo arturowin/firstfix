@@ -6,6 +6,14 @@ export interface IdempotencyInput {
   requestHash: string;
 }
 
+export interface SubmitInput {
+  scanId: string;
+  repo: RepoRef;
+  idempotency: IdempotencyInput | null;
+  /** Omitted: a public scan. Private: bound to these ids for its whole life. */
+  private?: { repositoryId: number; installationId: number; submittedBy: number };
+}
+
 export type SubmitResult =
   | { kind: 'created'; scanId: string }
   /** Same key, same request: the scan created by the first request. */
@@ -24,5 +32,5 @@ export interface ScanSubmission {
    * `maxOutstanding`: refuse (kind 'busy') when this many scans are already queued, running or retrying.
    * Replays of an existing Idempotency-Key are answered regardless: they create nothing.
    */
-  submit(input: { scanId: string; repo: RepoRef; idempotency: IdempotencyInput | null }): Promise<SubmitResult>;
+  submit(input: SubmitInput): Promise<SubmitResult>;
 }

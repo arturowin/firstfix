@@ -9,6 +9,7 @@ import type {
   ScanStage,
   ScanStatus,
   ScanView,
+  ScanVisibility,
   StaleCursor,
   StaleScan,
   UncheckedView,
@@ -27,6 +28,9 @@ interface ScanRow {
   repo_owner: string;
   repo_name: string;
   repo_url_normalized: string;
+  visibility: 'public' | 'private';
+  github_repo_id: string | null;
+  installation_id: string | null;
   commit_sha: string | null;
   lockfile_path: string | null;
   advisory_source: string | null;
@@ -46,10 +50,18 @@ interface ScanRow {
   completed_at: Date | null;
 }
 
+/** bigint ids arrive as strings; GitHub ids are well inside Number's safe range. */
+function visibilityOf(r: Pick<ScanRow, 'visibility' | 'github_repo_id' | 'installation_id'>): ScanVisibility {
+  if (r.visibility === 'public') return { kind: 'public' };
+  if (r.github_repo_id === null || r.installation_id === null) throw new Error('private scan without its repository binding');
+  return { kind: 'private', repositoryId: Number(r.github_repo_id), installationId: Number(r.installation_id) };
+}
+
 function toView(r: ScanRow): ScanView {
   return {
     id: r.id,
     repo: { owner: r.repo_owner, name: r.repo_name, url: r.repo_url_normalized },
+    visibility: visibilityOf(r),
     commitSha: r.commit_sha,
     lockfilePath: r.lockfile_path,
     advisorySource: r.advisory_source,
@@ -185,15 +197,27 @@ export class PostgresScanRepository implements ScanRepository {
   }
 
   async claim(scanId: string): Promise<ClaimedScan | null> {
-    const { rows } = await this.pool.query<{ attempt: number; repo_owner: string; repo_name: string }>(
+    const { rows } = await this.pool.query<
+      { attempt: number; repo_owner: string; repo_name: string } & Pick<ScanRow, 'visibility' | 'github_repo_id' | 'installation_id'>
+    >(
       `UPDATE scans
           SET attempt = attempt + 1, status = 'running', stage = 'fetching', error_code = NULL, error_message = NULL
         WHERE id = $1 AND status NOT IN ${TERMINAL}
-        RETURNING attempt, repo_owner, repo_name`,
+        RETURNING attempt, repo_owner, repo_name, visibility, github_repo_id, installation_id`,
       [scanId],
     );
     const row = rows[0];
-    return row ? { scanId, attempt: row.attempt, repo: { owner: row.repo_owner, name: row.repo_name } } : null;
+    if (!row) return null;
+    const visibility = visibilityOf(row);
+    return {
+      scanId,
+      attempt: row.attempt,
+      repo: { owner: row.repo_owner, name: row.repo_name },
+      access:
+        visibility.kind === 'public'
+          ? { kind: 'public' }
+          : { kind: 'installation', installationId: visibility.installationId, repositoryId: visibility.repositoryId },
+    };
   }
 
   async recordProgress(

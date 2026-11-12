@@ -3,6 +3,7 @@ import type { FixStatus } from '../domain/candidate.ts';
 import type { StoredExplanation } from '../domain/explanation.ts';
 import type { EcosystemId } from '../domain/ecosystems/types.ts';
 import type { Scope } from '../domain/lockfile.ts';
+import type { RepoAccess } from './repo-source.ts';
 
 export type ScanStatus = 'queued' | 'running' | 'retrying' | 'completed' | 'unsupported' | 'failed';
 export type ScanStage = 'fetching' | 'scanning' | 'analyzing';
@@ -14,9 +15,15 @@ export interface ScanCounts {
   failedLookups: number;
 }
 
+/** Private scans are bound to a GitHub repository id and installation id, fixed at submit. */
+export type ScanVisibility =
+  | { kind: 'public' }
+  | { kind: 'private'; repositoryId: number; installationId: number };
+
 export interface ScanView {
   id: string;
   repo: { owner: string; name: string; url: string };
+  visibility: ScanVisibility;
   commitSha: string | null;
   /** Which lockfile was scanned, relative to the repository root. */
   lockfilePath: string | null;
@@ -99,6 +106,8 @@ export interface ClaimedScan {
   scanId: string;
   attempt: number;
   repo: { owner: string; name: string };
+  /** From the scan's visibility: public scans never get credentials that can read private content. */
+  access: RepoAccess;
 }
 
 export interface Completion {

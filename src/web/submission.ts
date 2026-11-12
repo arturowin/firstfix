@@ -16,8 +16,8 @@ export interface PostResponse {
 
 export type SubmitOutcome =
   | { kind: 'accepted'; scanId: string }
-  /** Not accepted; `retryable` means the same key is kept for the next attempt. */
-  | { kind: 'error'; message: string; retryable: boolean }
+  /** Not accepted; `retryable` means the same key is kept for the next attempt. `status`: the HTTP answer, if any. */
+  | { kind: 'error'; message: string; retryable: boolean; status?: number }
   /** A request is already in flight; nothing was sent. */
   | { kind: 'ignored' };
 
@@ -89,6 +89,6 @@ export class SubmissionFlow {
     // URL, key already used for another repository) won't change on retry: start fresh next time.
     const retryable = res.status === 429 || res.status >= 500;
     if (!retryable) this.pending = null;
-    return { kind: 'error', message, retryable };
+    return { kind: 'error', message, retryable, status: res.status };
   }
 }

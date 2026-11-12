@@ -19,7 +19,7 @@ function lockfile(packages: Record<string, unknown>, lockfileVersion = 3): strin
 function source(lock: string | null | Error): RepoSource {
   return {
     resolveDefaultCommit: () => Promise.resolve({ sha: SHA, branch: 'main' }),
-    readFile: (_repo, _sha, path) =>
+    readFile: (_repo, _access, _sha, path) =>
       lock instanceof Error ? Promise.reject(lock) : Promise.resolve(path === 'package-lock.json' ? lock : null),
   };
 }
