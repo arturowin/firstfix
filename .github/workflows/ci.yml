@@ -1,0 +1,65 @@
+# Runs the project's required checks (CLAUDE.md: typecheck, lint, test) on every pull request and on main.
+# Tests need PostgreSQL: a service container provides it, and each test file creates its own throwaway database.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: firstfix
+          POSTGRES_PASSWORD: firstfix-ci # CI-only, throwaway container
+          POSTGRES_DB: firstfix
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U firstfix -d firstfix"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://firstfix:firstfix-ci@localhost:5432/firstfix
+      # No LLM key in CI: the eval checks the template explainer only.
+      LLM_API_KEY: ''
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Eval (template explainer)
+        run: npm run eval
+
+      - name: Build the UI bundle
+        run: npm run build:web
