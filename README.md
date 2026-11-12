@@ -4,6 +4,8 @@
 
 FirstFix checks GitHub repositories for known security issues: public repositories anonymously, private ones after signing in with GitHub. Paste a repository URL (or pick one of yours), follow the scan, and get a report that explains what to address first, why it matters, and how to verify the change.
 
+**Live demo:** <https://firstfix-35-233-9-207.sslip.io>. See [Try the demo](#try-the-demo) for a repository to scan.
+
 ### What it checks today
 
 - **Dependencies:** npm projects with a root `package-lock.json` (v2 or v3), checked against OSV.dev advisory data.
@@ -48,9 +50,15 @@ Users see repositories that both they and the GitHub App can access, including o
 
 ### Try the demo
 
-Paste `https://github.com/arturowin/scan-review-demo` into FirstFix. Look for the recommendation to remove `flatmap-stream`, the advisory evidence behind that recommendation, and the Git dependency the scanner couldn’t check.
+A hosted demo runs at <https://firstfix-35-233-9-207.sslip.io>, with GitHub sign-in for private repositories. It is a demo instance and may be taken down; running FirstFix locally (above) works the same way.
 
-The demo repository intentionally pins vulnerable and malicious package versions. Scan it by URL and avoid installing its dependencies.
+Paste `https://github.com/arturowin/scan-review-demo` into the hosted demo or your local FirstFix. Look for:
+
+- **Dependencies:** the recommendation to remove `flatmap-stream`, the advisory evidence behind it, and the Git dependency the scanner couldn’t check.
+- **Source code:** three TLS findings in `src/tls.ts` and `test/client.test.ts`, one of them labelled as a test file. The same setting in a comment and a string is not flagged.
+- **Hand off to a coding agent:** one prompt covering both the dependency changes and the source locations.
+
+The demo repository intentionally pins vulnerable and malicious package versions and contains insecure TLS settings. Scan it by URL; don't install its dependencies or run its code.
 
 ## Product interpretation
 
