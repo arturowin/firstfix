@@ -1,7 +1,8 @@
 # FirstFix — project guide for Claude Code
 
-A user submits a public GitHub repo URL, follows scan progress, and gets a prioritized, explained
-dependency-security review with recommended next actions. Read `docs/ARCHITECTURE.md` and `docs/PLAN.md` before any work.
+A user submits a GitHub repo URL (public, or private after signing in with GitHub), follows scan progress, and
+gets a prioritized, explained security review: dependency findings and targeted source checks, with recommended
+next actions. Read `docs/ARCHITECTURE.md` and `docs/PLAN.md` before any work.
 
 ## Product in one line
 Help a repository owner turn security findings into a prioritized next step, without needing
@@ -30,10 +31,14 @@ security expertise. Facts come from the scan; AI only explains them.
 src/
   api/main.ts            composition root for the API process
   worker/main.ts         composition root for the worker process
-  domain/                types, ranking policy, lockfile parser, fix-plan builder (pure, no I/O)
-  application/           ScanService (API side), ScanPipeline (worker side)
-  ports/                 ScanRepository, JobQueue, RepoSource, VulnDatabase, Explainer
-  adapters/              postgres, pgboss, github, osv, llm, template-explainer
+  domain/                types, ranking policy, lockfile parser, fix-plan builder, source rules and scanner,
+                         access rules, agent prompt, report text (pure, no I/O)
+  application/           ScanService and AccessService (API side), ScanPipeline and runSourceCheck (worker side),
+                         report, explanations, retention
+  ports/                 ScanRepository, ScanSubmission, JobQueue, RepoSource, VulnDatabase, Explainer,
+                         GitHubAuth, SessionStore
+  adapters/              postgres, pgboss, github (public reads, user sign-in, app tokens), osv, llm,
+                         template-explainer, secret-box
   web/                   static UI
 migrations/              plain SQL, numbered
 test/                    unit, integration, contract, fixtures
@@ -55,9 +60,44 @@ test/                    unit, integration, contract, fixtures
 10. Permanent failures (not found, forbidden, unsupported) are recorded and the handler returns normally.
     Only transient errors throw. Don't weaken or delete a failing test to make it pass. Report it.
 11. Before finishing a task: `npm run typecheck && npm run lint && npm test` all green.
-12. Commit after each green step with a clear message (the history should read as a record of decisions). Never commit `.env`.
+12. Commit only when the human asks, with a clear message (the history should read as a record of decisions),
+    on a branch from `main` with one PR per change. Never commit `.env` or other local env files (only
+    `.env.example`).
 13. After each milestone, append an entry to `docs/AGENT_LOG.md` (what you did, what you assumed,
     anything the human corrected). Keep entries short and factual.
+14. Never print secrets or ask for them in chat. The human puts them in a git-ignored file, and you copy
+    them where needed without showing their values.
+
+## Security invariants
+Keep these true; a change that weakens one needs the human's approval first.
+- **Public scans never use credentials that can read private repositories.** File reads are anonymous. A
+  public scan stops if GitHub reports the repository as private, also when it became private after submit.
+  `GITHUB_TOKEN` is used only for metadata calls, and only after the worker's startup check finds no `repo`
+  scope and no readable private repository. The check runs once per worker start.
+- **GitHub decides who reads a private scan.** `GET /scans/:id` and `/report` require GitHub to list the scan's
+  repository id, for the viewer's own token, in the scan's installation (cached per session for at most 5
+  minutes). No session or no access → 404, the same as a missing scan. Expired session → 401. GitHub
+  unavailable → 503, never an expired decision. These responses are `no-store` and vary by cookie.
+- **Private reads are scoped to one repository.** The worker uses an installation token limited to the scan's
+  repository id, with contents and metadata read-only. The repository is bound by id, not name.
+- **Sessions and secrets at rest.** The session cookie is random; the database stores only its SHA-256.
+  GitHub tokens and PKCE verifiers are AES-256-GCM encrypted with a key derived from `SESSION_SECRET`.
+  Cookies are HttpOnly, Secure, SameSite=Lax. OAuth uses PKCE (S256) and a one-time state bound to the
+  browser. Sign-ins last at most 8 hours. After sign-in, only `/` or a scan page is a valid return path.
+- **Repository code is never executed or installed,** and complete files are never stored: at most
+  200-character matched excerpts.
+- **Untrusted text is data.** Repository, advisory and AI text is rendered with `textContent`, never
+  `innerHTML`. AI text is used only if it passes the facts check; otherwise the template is shown.
+- **The coding-agent prompt holds only validated fields** (package names, versions, advisory ids, paths and
+  line numbers that match strict formats) and fixed text from this codebase. Code excerpts, advisory titles,
+  and AI or template prose never go in. Anything that fails validation is replaced by a note.
+- **What the LLM provider receives** (only with `LLM_API_KEY`, also for private repositories): the repository
+  owner/name, dependency facts (package names, versions, advisory ids, severities, titles), and source rule
+  ids and counts. Never source code, file paths or file contents. Advisory titles are external text and are
+  framed as data in the prompt.
+- **Logs never contain credentials or query strings** (OAuth codes arrive in one).
+- **Only `github.com` repository URLs are accepted.** Outbound calls go only to GitHub, OSV.dev and the
+  configured LLM provider.
 
 ## Verify, don't assume
 - Check the INSTALLED pg-boss version's docs/types for: sending a job inside an existing transaction,
