@@ -493,3 +493,14 @@ One entry per milestone (or per notable session). Keep it factual.
     the way to find them.
   - Reports with source findings but no dependency findings showed two "Scan again" buttons (summary card and
     handoff card). The handoff card now has one only on the layout whose summary card has none.
+
+### 2026-11-14 · Audience: application security managers
+- **Human noticed** that CLAUDE.md ("help a repository owner … without needing security expertise") and the AI
+  system prompt ("the reader owns the repository and is not a security expert") didn't match the stakeholder's
+  answer: the users are application security managers in organizations. The README already described that.
+- **Agent changed:** CLAUDE.md's product line, and the system prompt's reader line: an application security
+  manager who prioritizes the work and hands it to the repository's owners; precise and brief, no basic terms
+  explained. All other prompt rules, the facts check and the template fallback are unchanged.
+- **Verified by:** typecheck, lint, 756 tests, template eval; live-model eval twice (11/12, then 12/12) and the
+  old prompt once (12/12). The one failure ("claims a fix" for express) is intermittent and also seen with the
+  old prompt on the hosted demo. A side-by-side summary showed the new text ranking the work for a manager.

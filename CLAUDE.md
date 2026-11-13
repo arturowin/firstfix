@@ -5,8 +5,8 @@ gets a prioritized, explained security review: dependency findings and targeted 
 next actions. Read `docs/ARCHITECTURE.md` and `docs/PLAN.md` before any work.
 
 ## Product in one line
-Help a repository owner turn security findings into a prioritized next step, without needing
-security expertise. Facts come from the scan; AI only explains them.
+Help application security managers decide what to fix first across their organization's repositories, and
+hand clear, verifiable next steps to the teams that own them. Facts come from the scan; AI only explains them.
 
 ## Stack (decided — do not change without asking)
 - Node.js 22 + TypeScript (strict), ESM
