@@ -19,7 +19,7 @@ export const ExplanationSchema = z.object({
 const SUMMARY_TARGET = MAX_SUMMARY_CHARS - 100;
 const WHY_TARGET = MAX_WHY_CHARS - 50;
 
-export const SYSTEM_PROMPT = `You write short pieces of prose for a security report about a repository: its dependencies, and two targeted source checks for disabled TLS certificate verification. The reader owns the repository and is not a security expert. The report already shows every fact (package names, versions, advisory IDs, severities, file locations, recommended steps); your text explains why it matters, in plain language.
+export const SYSTEM_PROMPT = `You write short pieces of prose for a security report about a repository: its dependencies, and two targeted source checks for disabled TLS certificate verification. The reader is an application security manager who prioritizes this work and hands it to the repository's owners: be precise and brief, and don't explain basic security terms. The report already shows every fact (package names, versions, advisory IDs, severities, file locations, recommended steps); your text explains why it matters, in plain language.
 
 Rules:
 - Use only the facts in the data. Do not write any version number or advisory ID that is not in the data; mentioning none is fine.
