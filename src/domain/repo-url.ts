@@ -1,4 +1,4 @@
-/** A public GitHub repository, identified by lowercase owner/name. */
+/** A GitHub repository (public or private), identified by lowercase owner/name. */
 export interface RepoRef {
   owner: string;
   name: string;
@@ -34,7 +34,7 @@ export function parseRepoUrl(input: string): ParseRepoUrlResult {
     return { ok: false, error: 'Use an https://github.com/owner/repo URL' };
   }
   if (!HOSTS.has(url.hostname.toLowerCase())) {
-    return { ok: false, error: 'Only public repositories on github.com are supported' };
+    return { ok: false, error: 'Only repositories on github.com are supported' };
   }
   if (url.username || url.password || url.port) {
     return { ok: false, error: 'Use a plain https://github.com/owner/repo URL' };

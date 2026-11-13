@@ -28,7 +28,7 @@ describe('parseRepoUrl', () => {
   it.each([
     ['', /Enter a GitHub repository URL/],
     ['not a url at all', /not a valid URL|github.com/],
-    ['https://gitlab.com/owner/repo', /Only public repositories on github.com/],
+    ['https://gitlab.com/owner/repo', /^Only repositories on github\.com are supported$/],
     ['https://github.com/owner', /both owner and repository/],
     ['https://github.com/owner/repo/tree/main', /not a branch, folder or file/],
     ['https://github.com/owner/repo?tab=readme', /query string/],
